@@ -41,21 +41,6 @@ OUTCOME_ORDER = [
     "BB", "HBP", "1B", "2B", "3B", "HR", "K", "Out", "DP", "FC", "ROE",
     "Ball", "Called Strike", "Swinging Strike", "Foul", "In Play", "Other",
 ]
-RUN_VALUE = {
-    "BB": 0.32,
-    "HBP": 0.34,
-    "1B": 0.47,
-    "2B": 0.78,
-    "3B": 1.09,
-    "HR": 1.40,
-    "K": -0.29,
-    "Out": -0.25,
-    "DP": -0.55,
-    "FC": -0.18,
-    "ROE": 0.45,
-    "In Play": 0.00,
-    "Other": 0.00,
-}
 
 def active_db_path():
     if os.path.exists(DB_PATH):
@@ -290,25 +275,6 @@ def plate_outcome(row):
         return "In Play"
     return "Other"
 
-def pitch_run_value(outcome, balls=None, strikes=None):
-    if outcome in RUN_VALUE:
-        return RUN_VALUE[outcome]
-
-    try:
-        b = int(balls) if balls is not None else None
-        s = int(strikes) if strikes is not None else None
-    except (TypeError, ValueError):
-        b = None
-        s = None
-
-    if outcome == "Ball":
-        return RUN_VALUE["BB"] if b == 3 else 0.06
-    if outcome in {"Called Strike", "Swinging Strike"}:
-        return RUN_VALUE["K"] if s == 2 else -0.07
-    if outcome == "Foul":
-        return -0.04 if s is not None and s < 2 else 0.01
-    return 0.0
-
 def empirical_run_value(row, outcome):
     delta_run_exp = row.get("delta_run_exp")
     if delta_run_exp is not None:
@@ -316,14 +282,7 @@ def empirical_run_value(row, outcome):
             return float(delta_run_exp)
         except (TypeError, ValueError):
             pass
-
-    runs_on_pa = row.get("runs_on_pa")
-    if runs_on_pa is not None:
-        try:
-            return float(runs_on_pa)
-        except (TypeError, ValueError):
-            pass
-    return pitch_run_value(outcome, row.get("balls"), row.get("strikes"))
+    return 0.0
 
 def pitcher_wpa_value(row):
     pitcher_wpa = row.get("pitcher_wpa")
@@ -360,7 +319,23 @@ def batting_wpa_value(row):
 
     return None
 
-def summarize_outcomes(rows):
+def has_filter_value(value):
+    null_vals = {"", "none", "null", "undefined", "all", "0"}
+    return str(value).strip().lower() not in null_vals if value is not None else False
+
+def wpa_perspective_for_filters(pitcher_id=None, batter_id=None):
+    if has_filter_value(pitcher_id):
+        return "pitcher"
+    if has_filter_value(batter_id):
+        return "batter"
+    return "batter"
+
+def wpa_value_for_perspective(row, perspective):
+    if perspective == "pitcher":
+        return pitcher_wpa_value(row)
+    return batting_wpa_value(row)
+
+def summarize_outcomes(rows, wpa_perspective="batter"):
     total = len(rows)
     counts = {key: 0 for key in OUTCOME_ORDER}
     pitch_types = {}
@@ -383,7 +358,7 @@ def summarize_outcomes(rows):
             }
 
         rv = empirical_run_value(row_dict, outcome)
-        wpa = batting_wpa_value(row_dict)
+        wpa = wpa_value_for_perspective(row_dict, wpa_perspective)
         pitch_types[pitch_type]["total"] += 1
         pitch_types[pitch_type]["runValue"] += rv
         if wpa is not None:
@@ -410,7 +385,7 @@ def summarize_outcomes(rows):
         win_prob_change = (
             round((data["wpa"] / wpa_count) * 100, 2)
             if wpa_count
-            else round(-expected_runs * 9.0, 2)
+            else round(expected_runs * (1 if wpa_perspective == "batter" else -1) * 9.0, 2)
         )
         pitch_type_outcomes.append({
             "pitchType": pitch_type,
@@ -428,6 +403,7 @@ def summarize_outcomes(rows):
 
     return {
         "total": total,
+        "wpaPerspective": wpa_perspective,
         "outcomes": outcomes,
         "pitchTypeOutcomes": pitch_type_outcomes,
     }
@@ -436,8 +412,6 @@ def outcome_select_columns():
     cols = ["pitch_type", "balls", "strikes", "description", "type", "events"]
     if "delta_run_exp" in PITCH_COLUMNS:
         cols.append("delta_run_exp")
-    if "runs_on_pa" in PITCH_COLUMNS:
-        cols.append("runs_on_pa")
     if "pitcher_wpa" in PITCH_COLUMNS:
         cols.append("pitcher_wpa")
     elif "delta_home_win_exp" in PITCH_COLUMNS and "inning_topbot" in PITCH_COLUMNS:
@@ -787,8 +761,10 @@ async def get_pitch_outcomes(
             on3b=on3b,
         )
 
+        wpa_perspective = wpa_perspective_for_filters(pitcherId, batterId)
+
         if where is None:
-            return summarize_outcomes([])
+            return summarize_outcomes([], wpa_perspective)
 
         query = f"""
             SELECT {outcome_select_columns()}
@@ -796,11 +772,11 @@ async def get_pitch_outcomes(
             {where}
         """
         rows = fetch_all_dicts(query, params)
-        return summarize_outcomes(rows)
+        return summarize_outcomes(rows, wpa_perspective)
 
     except Exception as e:
         print(f"❌ Outcomes API 錯誤: {e}")
-        return summarize_outcomes([])
+        return summarize_outcomes([], wpa_perspective_for_filters(pitcherId, batterId))
 
 @app.get("/api/pitches/predict")
 async def get_pitch_prediction(
@@ -831,6 +807,8 @@ async def get_pitch_prediction(
             on3b=on3b,
         )
 
+        wpa_perspective = wpa_perspective_for_filters(pitcherId, batterId)
+
         if where is None:
             return {"total": 0, "recommendations": []}
 
@@ -840,9 +818,10 @@ async def get_pitch_prediction(
             {where}
         """
         rows = fetch_all_dicts(query, params)
-        summary = summarize_outcomes(rows)
+        summary = summarize_outcomes(rows, wpa_perspective)
         return {
             "total": summary["total"],
+            "wpaPerspective": summary["wpaPerspective"],
             "recommendations": summary["pitchTypeOutcomes"][:6],
             "model": "empirical_outcome_distribution_v1",
         }
