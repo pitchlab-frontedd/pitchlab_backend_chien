@@ -67,6 +67,9 @@ def main():
             cursor.execute("SELECT current_database(), current_user")
             db_name, user = cursor.fetchone()
             print(f"Connected as {user} to {db_name}")
+            cursor.execute("SELECT pg_size_pretty(pg_database_size(current_database()))")
+            db_size = cursor.fetchone()[0]
+            print(f"Database size: {db_size}")
 
             cursor.execute(
                 """
