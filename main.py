@@ -108,6 +108,20 @@ def table_columns(conn, table_name):
     cursor.close()
     return cols
 
+def table_count(conn, table_name):
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+    count = cursor.fetchone()[0]
+    cursor.close()
+    return count
+
+def table_date_range(conn, table_name):
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT MIN(game_date), MAX(game_date) FROM {table_name}")
+    min_date, max_date = cursor.fetchone()
+    cursor.close()
+    return min_date, max_date
+
 def load_player_names(conn, player_ids):
     if not player_ids:
         return {}
@@ -605,6 +619,37 @@ async def startup_event():
 @app.get("/api/batters")
 async def get_batters():
     return sorted([{"id": k, "name": v} for k, v in batter_name_map.items()], key=lambda x: x['name'])
+
+@app.get("/api/health")
+async def get_health():
+    health = {
+        "ok": False,
+        "backend": "PostgreSQL" if using_postgres() else "SQLite",
+        "databaseUrlSet": using_postgres(),
+        "tableName": TABLE_NAME,
+        "batterNameCount": len(batter_name_map),
+    }
+
+    try:
+        conn = connect_db()
+        tables = table_names(conn)
+        health["tables"] = tables
+
+        if TABLE_NAME in tables:
+            health["pitchesRows"] = table_count(conn, TABLE_NAME)
+            min_date, max_date = table_date_range(conn, TABLE_NAME)
+            health["gameDateRange"] = {"min": min_date, "max": max_date}
+            health["columns"] = sorted(table_columns(conn, TABLE_NAME))
+
+        if "player_names" in tables:
+            health["playerNamesRows"] = table_count(conn, "player_names")
+
+        conn.close()
+        health["ok"] = bool(health.get("pitchesRows"))
+        return health
+    except Exception as e:
+        health["error"] = str(e)
+        return health
 
 @app.get("/api/pitchers")
 async def get_pitchers():
