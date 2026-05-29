@@ -19,7 +19,7 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_DB_FILENAME = os.getenv("BASEBALL_DB_FILENAME", "baseball_data_2023_2025.db")
+PUBLIC_DB_FILENAME = os.getenv("BASEBALL_DB_FILENAME", "baseball_data_2024_2025.db")
 DB_PATH = os.path.join(BASE_DIR, PUBLIC_DB_FILENAME)
 FULL_DB_PATH = os.path.join(BASE_DIR, "baseball_data.db")
 LOCAL_DESKTOP_DB_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "baseball_data.db"))

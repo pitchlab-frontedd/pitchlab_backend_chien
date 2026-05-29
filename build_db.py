@@ -14,12 +14,12 @@ def create_database():
     
     # 💡 專業建議：如果你發現舊資料沒名字或沒出局標記，建議刪除原有的 baseball_data.db 重新執行
     conn = sqlite3.connect(db_file)
-    start_year = int(os.getenv("START_YEAR", "2023"))
+    start_year = int(os.getenv("START_YEAR", "2024"))
     current_year = int(os.getenv("END_YEAR", "2025"))
     only_start_date = os.getenv("START_DATE")
     only_end_date = os.getenv("END_DATE")
     
-    print(f"🚀 開始建立 2015-{current_year} 棒球資料庫 (含姓名、出局標記與篩選器索引)...")
+    print(f"🚀 開始建立 {start_year}-{current_year} 棒球資料庫 (含姓名、出局標記與篩選器索引)...")
 
     if only_start_date and only_end_date:
         periods = [(int(only_start_date[:4]), [(only_start_date, only_end_date)])]

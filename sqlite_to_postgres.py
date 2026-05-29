@@ -7,10 +7,20 @@ from psycopg2.extras import execute_values
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_DB = os.getenv(
     "SQLITE_DB_PATH",
-    os.path.join(BASE_DIR, "baseball_data_2023_2025.db"),
+    os.path.join(BASE_DIR, "baseball_data_2024_2025.db"),
 )
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "10000"))
+
+
+def normalize_database_url(database_url):
+    if database_url and database_url.startswith("DATABASE_URL="):
+        print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
+        return database_url.split("=", 1)[1].strip().strip("'\"")
+    return database_url
+
+
+DATABASE_URL = normalize_database_url(DATABASE_URL)
 
 COLUMNS = [
     "game_pk",

@@ -3,8 +3,8 @@ import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOURCE_DB = os.path.join(BASE_DIR, "baseball_data.db")
-OUTPUT_DB = os.path.join(BASE_DIR, "baseball_data_2023_2025.db")
-START_YEAR = "2023"
+OUTPUT_DB = os.path.join(BASE_DIR, "baseball_data_2024_2025.db")
+START_YEAR = "2024"
 END_YEAR = "2025"
 
 INDEXES = [

@@ -37,8 +37,15 @@ def masked_database_url(database_url):
     return f"{parsed.scheme}://***@{host}{port}/{db_name}"
 
 
+def normalize_database_url(database_url):
+    if database_url and database_url.startswith("DATABASE_URL="):
+        print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
+        return database_url.split("=", 1)[1].strip().strip("'\"")
+    return database_url
+
+
 def main():
-    database_url = os.getenv("DATABASE_URL")
+    database_url = normalize_database_url(os.getenv("DATABASE_URL"))
     if not database_url:
         print("DATABASE_URL is not set. This app will use SQLite, not Supabase/PostgreSQL.")
         return 1
