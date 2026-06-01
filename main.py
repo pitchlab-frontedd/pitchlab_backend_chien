@@ -4,7 +4,6 @@ import os
 import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pybaseball import playerid_reverse_lookup
 import uvicorn
 
 try:
@@ -26,6 +25,7 @@ LOCAL_DESKTOP_DB_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "baseball_d
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 batter_name_map = {}
+pitcher_name_map = {}
 TABLE_NAME = "pitches"
 PITCH_COLUMNS = set()
 
@@ -121,6 +121,40 @@ def table_date_range(conn, table_name):
     min_date, max_date = cursor.fetchone()
     cursor.close()
     return min_date, max_date
+
+def fetch_player_name_options(player_column, fallback_label, source_name_column=None):
+    conn = connect_db()
+    try:
+        tables = table_names(conn)
+        has_player_names = "player_names" in tables
+        name_expr = f"'{fallback_label} ' || CAST(p.{player_column} AS TEXT)"
+        if has_player_names and source_name_column:
+            name_expr = f"COALESCE(n.name, p.{source_name_column}, {name_expr})"
+        elif has_player_names:
+            name_expr = f"COALESCE(n.name, {name_expr})"
+        elif source_name_column:
+            name_expr = f"COALESCE(p.{source_name_column}, {name_expr})"
+
+        join_sql = (
+            f"LEFT JOIN player_names n ON n.player_id = p.{player_column}"
+            if has_player_names
+            else ""
+        )
+        query = f"""
+            SELECT DISTINCT p.{player_column} AS id, {name_expr} AS name
+            FROM {TABLE_NAME} p
+            {join_sql}
+            WHERE p.{player_column} IS NOT NULL
+            ORDER BY name
+        """
+        df = pd.read_sql(query, conn)
+        return {
+            str(int(row["id"])): row["name"]
+            for _, row in df.iterrows()
+            if pd.notna(row["id"])
+        }
+    finally:
+        conn.close()
 
 def load_player_names(conn, player_ids):
     if not player_ids:
@@ -539,7 +573,7 @@ def summarize_rows(rows):
 
 @app.on_event("startup")
 async def startup_event():
-    global batter_name_map, TABLE_NAME, PITCH_COLUMNS
+    global TABLE_NAME, PITCH_COLUMNS
 
     if not using_postgres():
         # --- 1. 下載邏輯 (使用 Dropbox 直連) ---
@@ -590,26 +624,7 @@ async def startup_event():
             return
         PITCH_COLUMNS = set(table_columns(conn, TABLE_NAME))
 
-        print("正在讀取打者清單並進行名稱轉換 (這一步連線較久)...")
-        u_ids = pd.read_sql(f"SELECT DISTINCT batter FROM {TABLE_NAME} WHERE batter IS NOT NULL", conn)["batter"].tolist()
-        stored_names = load_player_names(conn, u_ids)
         conn.close()
-
-        batter_name_map = {
-            str(int(batter_id)): stored_names.get(str(int(batter_id)), f"Batter {int(batter_id)}")
-            for batter_id in u_ids
-            if pd.notna(batter_id)
-        }
-
-        missing_ids = [int(batter_id) for batter_id in u_ids if pd.notna(batter_id) and str(int(batter_id)) not in stored_names]
-        if missing_ids:
-            try:
-                # 這裡只補查 player_names 尚未涵蓋的球員。
-                lookup_df = playerid_reverse_lookup(missing_ids, key_type='mlbam')
-                for _, row in lookup_df.iterrows():
-                    batter_name_map[str(row['key_mlbam'])] = f"{row['name_last'].title()}, {row['name_first'].title()}"
-            except Exception as e:
-                print(f"⚠️ 打者姓名轉換失敗，改用 batter ID 顯示: {e}")
         
         backend = "PostgreSQL" if using_postgres() else "SQLite"
         print(f"✅ 後端初始化完成，使用 {backend} 資料庫！")
@@ -618,6 +633,13 @@ async def startup_event():
         print(f"❌ 啟動出錯: {e}")
 @app.get("/api/batters")
 async def get_batters():
+    global batter_name_map
+    if not batter_name_map:
+        try:
+            batter_name_map = fetch_player_name_options("batter", "Batter")
+        except Exception as e:
+            print(f"❌ Batters API 錯誤: {e}")
+            return []
     return sorted([{"id": k, "name": v} for k, v in batter_name_map.items()], key=lambda x: x['name'])
 
 @app.get("/api/health")
@@ -653,12 +675,15 @@ async def get_health():
 
 @app.get("/api/pitchers")
 async def get_pitchers():
+    global pitcher_name_map
+    if pitcher_name_map:
+        return sorted([{"id": k, "name": v} for k, v in pitcher_name_map.items()], key=lambda x: x["name"])
+
     try:
-        conn = connect_db()
-        df = pd.read_sql(f"SELECT DISTINCT pitcher, player_name FROM {TABLE_NAME} WHERE player_name IS NOT NULL", conn)
-        conn.close()
-        return [{"id": str(int(row['pitcher'])), "name": row['player_name']} for _, row in df.iterrows()]
-    except:
+        pitcher_name_map = fetch_player_name_options("pitcher", "Pitcher", "player_name")
+        return sorted([{"id": k, "name": v} for k, v in pitcher_name_map.items()], key=lambda x: x["name"])
+    except Exception as e:
+        print(f"❌ Pitchers API 錯誤: {e}")
         return []
 
 @app.get("/api/pitches")

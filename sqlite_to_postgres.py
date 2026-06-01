@@ -103,6 +103,7 @@ def main():
     target.autocommit = False
 
     with target.cursor() as cursor:
+        cursor.execute("DROP TABLE IF EXISTS player_names")
         cursor.execute("DROP TABLE IF EXISTS pitches")
         cursor.execute(CREATE_TABLE_SQL)
         target.commit()
