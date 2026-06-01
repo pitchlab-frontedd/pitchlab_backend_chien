@@ -439,6 +439,7 @@ def summarize_outcomes(rows, wpa_perspective="batter"):
             "pitchType": pitch_type,
             "count": type_total,
             "expectedRuns": expected_runs,
+            "avgRunValue": expected_runs,
             "winProbChange": win_prob_change,
             "outRate": pct(
                 data["outcomes"]["K"] + data["outcomes"]["Out"] + data["outcomes"]["DP"] + data["outcomes"]["FC"],
@@ -848,8 +849,9 @@ async def get_pitch_outcomes(
         print(f"❌ Outcomes API 錯誤: {e}")
         return summarize_outcomes([], wpa_perspective_for_filters(pitcherId, batterId))
 
+@app.get("/api/pitches/empirical")
 @app.get("/api/pitches/predict")
-async def get_pitch_prediction(
+async def get_pitch_empirical(
     year: str = None,
     pitcherId: str = None,
     batterId: str = None,
@@ -893,11 +895,12 @@ async def get_pitch_prediction(
             "total": summary["total"],
             "wpaPerspective": summary["wpaPerspective"],
             "recommendations": summary["pitchTypeOutcomes"][:6],
-            "model": "empirical_outcome_distribution_v1",
+            "source": "empirical_statcast_history",
+            "model": None,
         }
 
     except Exception as e:
-        print(f"❌ Prediction API 錯誤: {e}")
+        print(f"❌ Empirical API 錯誤: {e}")
         return {"total": 0, "recommendations": []}
     
 if __name__ == "__main__":
