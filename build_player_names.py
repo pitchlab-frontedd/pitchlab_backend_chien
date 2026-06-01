@@ -3,6 +3,7 @@ import sqlite3
 import time
 
 import pandas as pd
+import requests
 from pybaseball import playerid_reverse_lookup
 
 try:
@@ -19,6 +20,7 @@ SQLITE_DB = os.getenv(
 )
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("PLAYER_LOOKUP_BATCH_SIZE", "500"))
+MLB_API_BATCH_SIZE = int(os.getenv("MLB_API_LOOKUP_BATCH_SIZE", "100"))
 
 
 def normalize_database_url(database_url):
@@ -98,6 +100,46 @@ def upsert_names(conn, rows):
     cursor.close()
 
 
+def format_name(last_name, first_name):
+    return f"{str(last_name).title()}, {str(first_name).title()}"
+
+
+def lookup_pybaseball_names(player_ids):
+    lookup_df = playerid_reverse_lookup(player_ids, key_type="mlbam")
+    return [
+        (
+            int(row["key_mlbam"]),
+            format_name(row["name_last"], row["name_first"]),
+        )
+        for _, row in lookup_df.iterrows()
+    ]
+
+
+def lookup_mlb_api_names(player_ids):
+    rows = []
+    for i in range(0, len(player_ids), MLB_API_BATCH_SIZE):
+        chunk = player_ids[i:i + MLB_API_BATCH_SIZE]
+        response = requests.get(
+            "https://statsapi.mlb.com/api/v1/people",
+            params={"personIds": ",".join(str(player_id) for player_id in chunk)},
+            timeout=20,
+        )
+        response.raise_for_status()
+        for person in response.json().get("people", []):
+            player_id = person.get("id")
+            first_name = person.get("useName") or person.get("firstName")
+            last_name = person.get("lastName")
+            full_name = person.get("fullName")
+            if player_id and first_name and last_name:
+                rows.append((int(player_id), format_name(last_name, first_name)))
+            elif player_id and full_name:
+                parts = full_name.rsplit(" ", 1)
+                name = f"{parts[1]}, {parts[0]}" if len(parts) == 2 else full_name
+                rows.append((int(player_id), name))
+        time.sleep(0.1)
+    return rows
+
+
 def main():
     conn = connect_db()
     create_table(conn)
@@ -108,14 +150,21 @@ def main():
     saved = 0
     for i in range(0, len(player_ids), BATCH_SIZE):
         chunk = player_ids[i:i + BATCH_SIZE]
-        lookup_df = playerid_reverse_lookup(chunk, key_type="mlbam")
-        rows = [
-            (
-                int(row["key_mlbam"]),
-                f"{row['name_last'].title()}, {row['name_first'].title()}",
-            )
-            for _, row in lookup_df.iterrows()
-        ]
+        rows = lookup_pybaseball_names(chunk)
+        found_ids = {player_id for player_id, _ in rows}
+        missing_ids = [player_id for player_id in chunk if player_id not in found_ids]
+
+        if missing_ids:
+            try:
+                fallback_rows = lookup_mlb_api_names(missing_ids)
+                rows.extend(fallback_rows)
+                found_ids.update(player_id for player_id, _ in fallback_rows)
+                still_missing = len(missing_ids) - len(fallback_rows)
+                if still_missing:
+                    print(f"Missing names for {still_missing} ids in this batch")
+            except Exception as exc:
+                print(f"MLB Stats API fallback failed for {len(missing_ids)} ids: {exc}")
+
         upsert_names(conn, rows)
         saved += len(rows)
         print(f"Saved {saved:,}/{len(player_ids):,} names")
