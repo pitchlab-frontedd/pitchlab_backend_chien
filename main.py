@@ -236,6 +236,7 @@ def build_pitch_filters(
     balls=None,
     strikes=None,
     pitcherHand=None,
+    batterHand=None,
     outs=None,
     on1b=None,
     on2b=None,
@@ -255,6 +256,7 @@ def build_pitch_filters(
     b = str(balls).strip() if balls is not None else ""
     s = str(strikes).strip() if strikes is not None else ""
     hand = str(pitcherHand).strip() if pitcherHand else ""
+    batter_hand = str(batterHand).strip() if batterHand else ""
     out_count = str(outs).strip() if outs is not None else ""
     runner_filters = [
         ("on_1b", str(on1b).strip() if on1b is not None else ""),
@@ -279,6 +281,9 @@ def build_pitch_filters(
     if hand.lower() not in null_vals:
         conds.append(f"p_throws = {placeholder}")
         params.append(hand)
+    if batter_hand.lower() not in null_vals:
+        conds.append(f"stand = {placeholder}")
+        params.append(batter_hand)
     if out_count and out_count.lower() not in null_vals:
         conds.append(f"outs_when_up = {placeholder}")
         params.append(out_count)
@@ -793,6 +798,8 @@ async def get_pitches(
     pitchType: str = None,  # ⚾ 新增：接收球種
     balls: str = None,      # ⚾ 新增：接收壞球數
     strikes: str = None,    # ⚾ 新增：接收好球數
+    pitcherHand: str = None,
+    batterHand: str = None,
     on1b: str = None,
     on2b: str = None,
     on3b: str = None,
@@ -808,6 +815,8 @@ async def get_pitches(
             pitchType=pitchType,
             balls=balls,
             strikes=strikes,
+            pitcherHand=pitcherHand,
+            batterHand=batterHand,
             outs=outs,
             on1b=on1b,
             on2b=on2b,
@@ -856,6 +865,7 @@ async def get_pitch_summary(
     balls: str = None,
     strikes: str = None,
     pitcherHand: str = None,
+    batterHand: str = None,
     on1b: str = None,
     on2b: str = None,
     on3b: str = None,
@@ -872,6 +882,7 @@ async def get_pitch_summary(
             balls=balls,
             strikes=strikes,
             pitcherHand=pitcherHand,
+            batterHand=batterHand,
             outs=outs,
             on1b=on1b,
             on2b=on2b,
@@ -911,6 +922,7 @@ async def get_pitch_outcomes(
     balls: str = None,
     strikes: str = None,
     pitcherHand: str = None,
+    batterHand: str = None,
     on1b: str = None,
     on2b: str = None,
     on3b: str = None,
@@ -927,6 +939,7 @@ async def get_pitch_outcomes(
             balls=balls,
             strikes=strikes,
             pitcherHand=pitcherHand,
+            batterHand=batterHand,
             outs=outs,
             on1b=on1b,
             on2b=on2b,
@@ -960,6 +973,7 @@ async def get_pitch_empirical(
     balls: str = None,
     strikes: str = None,
     pitcherHand: str = None,
+    batterHand: str = None,
     on1b: str = None,
     on2b: str = None,
     on3b: str = None,
@@ -974,6 +988,7 @@ async def get_pitch_empirical(
             balls=balls,
             strikes=strikes,
             pitcherHand=pitcherHand,
+            batterHand=batterHand,
             outs=outs,
             on1b=on1b,
             on2b=on2b,
