@@ -200,6 +200,12 @@ def load_player_names(conn, player_ids):
 
     return names
 
+def has_fallback_names(name_map, fallback_label):
+    if not name_map:
+        return False
+    prefix = f"{fallback_label} "
+    return any(str(name).startswith(prefix) for name in name_map.values())
+
 def pct(part, total):
     return round((part / total) * 100, 1) if total else 0
 
@@ -736,7 +742,7 @@ async def startup_event():
 @app.get("/api/batters")
 async def get_batters():
     global batter_name_map
-    if not batter_name_map:
+    if not batter_name_map or has_fallback_names(batter_name_map, "Batter"):
         try:
             batter_name_map = fetch_player_name_options("batter", "Batter")
         except Exception as e:
@@ -778,7 +784,7 @@ async def get_health():
 @app.get("/api/pitchers")
 async def get_pitchers():
     global pitcher_name_map
-    if pitcher_name_map:
+    if pitcher_name_map and not has_fallback_names(pitcher_name_map, "Pitcher"):
         return sorted([{"id": k, "name": v} for k, v in pitcher_name_map.items()], key=lambda x: x["name"])
 
     try:
