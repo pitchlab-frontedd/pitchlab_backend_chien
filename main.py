@@ -42,6 +42,25 @@ OUTCOME_ORDER = [
     "Ball", "Called Strike", "Swinging Strike", "Foul", "In Play", "Other",
 ]
 
+HIT_EVENTS = {"single", "double", "triple", "home_run"}
+AT_BAT_EVENTS = HIT_EVENTS | OUT_EVENTS | {"strikeout", "field_error"}
+ON_BASE_EVENTS = HIT_EVENTS | {"walk", "intent_walk", "hit_by_pitch"}
+TOTAL_BASES_BY_EVENT = {
+    "single": 1,
+    "double": 2,
+    "triple": 3,
+    "home_run": 4,
+}
+WOBA_WEIGHTS = {
+    "walk": 0.69,
+    "intent_walk": 0.69,
+    "hit_by_pitch": 0.72,
+    "single": 0.88,
+    "double": 1.25,
+    "triple": 1.58,
+    "home_run": 2.03,
+}
+
 def active_db_path():
     if os.path.exists(DB_PATH):
         return DB_PATH
@@ -183,6 +202,12 @@ def load_player_names(conn, player_ids):
 
 def pct(part, total):
     return round((part / total) * 100, 1) if total else 0
+
+def avg(total, count, digits=1):
+    return round(total / count, digits) if count else None
+
+def optional_pitch_columns(*columns):
+    return [col for col in columns if col in PITCH_COLUMNS]
 
 def result_type(row):
     pitch_type = row.get("type")
@@ -508,10 +533,65 @@ def summarize_rows(rows):
         if pitch_type not in pitch_types:
             pitch_types[pitch_type] = {
                 "total": 0, "ball": 0, "called_strike": 0, "swinging_strike": 0,
-                "foul": 0, "in_play_out": 0, "in_play_hit": 0
+                "foul": 0, "in_play_out": 0, "in_play_hit": 0,
+                "rhb": 0, "lhb": 0, "speedSum": 0, "speedCount": 0,
+                "pa": 0, "ab": 0, "h": 0, "single": 0, "double": 0,
+                "triple": 0, "hr": 0, "so": 0, "bbe": 0, "totalBases": 0,
+                "wobaNumerator": 0, "wobaDenominator": 0,
+                "twoStrikePitches": 0, "putAway": 0
             }
         pitch_types[pitch_type]["total"] += 1
         pitch_types[pitch_type][result] += 1
+
+        stand = row_dict.get("stand")
+        if stand == "R":
+            pitch_types[pitch_type]["rhb"] += 1
+        elif stand == "L":
+            pitch_types[pitch_type]["lhb"] += 1
+
+        speed = row_dict.get("release_speed")
+        if speed is not None:
+            try:
+                pitch_types[pitch_type]["speedSum"] += float(speed)
+                pitch_types[pitch_type]["speedCount"] += 1
+            except (TypeError, ValueError):
+                pass
+
+        events = row_dict.get("events") or ""
+        if events:
+            pitch_types[pitch_type]["pa"] += 1
+            if events in AT_BAT_EVENTS:
+                pitch_types[pitch_type]["ab"] += 1
+            if events in HIT_EVENTS:
+                pitch_types[pitch_type]["h"] += 1
+            if events == "single":
+                pitch_types[pitch_type]["single"] += 1
+            elif events == "double":
+                pitch_types[pitch_type]["double"] += 1
+            elif events == "triple":
+                pitch_types[pitch_type]["triple"] += 1
+            elif events == "home_run":
+                pitch_types[pitch_type]["hr"] += 1
+            if events == "strikeout":
+                pitch_types[pitch_type]["so"] += 1
+            if events in TOTAL_BASES_BY_EVENT:
+                pitch_types[pitch_type]["totalBases"] += TOTAL_BASES_BY_EVENT[events]
+            if events in WOBA_WEIGHTS:
+                pitch_types[pitch_type]["wobaNumerator"] += WOBA_WEIGHTS[events]
+            if events in ON_BASE_EVENTS or events in AT_BAT_EVENTS:
+                pitch_types[pitch_type]["wobaDenominator"] += 1
+
+        if result in {"in_play_out", "in_play_hit"}:
+            pitch_types[pitch_type]["bbe"] += 1
+
+        try:
+            strikes_before_pitch = int(row_dict.get("strikes"))
+        except (TypeError, ValueError):
+            strikes_before_pitch = None
+        if strikes_before_pitch == 2:
+            pitch_types[pitch_type]["twoStrikePitches"] += 1
+            if events == "strikeout":
+                pitch_types[pitch_type]["putAway"] += 1
 
         try:
             zone_num = int(row_dict.get("zone"))
@@ -537,10 +617,26 @@ def summarize_rows(rows):
         pitch_type_data.append({
             "pitchType": pitch_type,
             "count": type_total,
+            "rhb": data["rhb"] if data["rhb"] else None,
+            "lhb": data["lhb"] if data["lhb"] else None,
             "pct": pct(type_total, total),
+            "mph": avg(data["speedSum"], data["speedCount"], 1),
+            "pa": data["pa"],
+            "ab": data["ab"],
+            "h": data["h"],
+            "singles": data["single"],
+            "doubles": data["double"],
+            "triples": data["triple"],
+            "hr": data["hr"],
+            "so": data["so"],
+            "bbe": data["bbe"],
+            "ba": avg(data["h"], data["ab"], 3),
+            "slg": avg(data["totalBases"], data["ab"], 3),
+            "woba": avg(data["wobaNumerator"], data["wobaDenominator"], 3),
             "ballPct": pct(data["ball"], type_total),
             "cswPct": pct(data["called_strike"] + data["swinging_strike"], type_total),
             "whiffPct": pct(data["swinging_strike"], type_swings),
+            "putAwayPct": pct(data["putAway"], data["twoStrikePitches"]),
             "inPlayPct": pct(data["in_play_out"] + data["in_play_hit"], type_total),
             "hitPct": pct(data["in_play_hit"], type_total),
         })
@@ -785,8 +881,13 @@ async def get_pitch_summary(
         if where is None:
             return summarize_rows([])
 
+        summary_columns = [
+            "pitch_type", "zone", "description", "type", "events",
+            *optional_pitch_columns("stand", "release_speed", "strikes"),
+        ]
+
         query = f"""
-            SELECT pitch_type, zone, description, type, events
+            SELECT {", ".join(summary_columns)}
             FROM {TABLE_NAME}
             {where}
         """
