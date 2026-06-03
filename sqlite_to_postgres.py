@@ -27,6 +27,7 @@ COLUMNS = [
     "pitch_type",
     "balls",
     "strikes",
+    "stand",
     "p_throws",
     "on_1b",
     "on_2b",
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS pitches (
     pitch_type TEXT,
     balls INTEGER,
     strikes INTEGER,
+    stand TEXT,
     p_throws TEXT,
     on_1b INTEGER,
     on_2b INTEGER,
@@ -86,6 +88,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pitcher ON pitches(pitcher)",
     "CREATE INDEX IF NOT EXISTS idx_batter ON pitches(batter)",
     "CREATE INDEX IF NOT EXISTS idx_public_filters ON pitches(game_date, pitcher_role, pitch_type, balls, strikes)",
+    "CREATE INDEX IF NOT EXISTS idx_stand ON pitches(stand)",
 ]
 
 

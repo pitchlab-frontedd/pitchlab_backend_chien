@@ -13,6 +13,7 @@ REQUIRED_PITCH_COLUMNS = {
     "pitch_type",
     "balls",
     "strikes",
+    "stand",
     "p_throws",
     "pitcher_role",
     "outs_when_up",
