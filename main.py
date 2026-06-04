@@ -408,10 +408,10 @@ def has_filter_value(value):
     return str(value).strip().lower() not in null_vals if value is not None else False
 
 def wpa_perspective_for_filters(pitcher_id=None, batter_id=None):
-    if has_filter_value(pitcher_id):
-        return "pitcher"
     if has_filter_value(batter_id):
         return "batter"
+    if has_filter_value(pitcher_id):
+        return "pitcher"
     return "batter"
 
 def wpa_value_for_perspective(row, perspective):
