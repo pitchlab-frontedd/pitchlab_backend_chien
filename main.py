@@ -520,6 +520,11 @@ def summarize_rows(rows):
             "resultData": [],
             "pitchTypeData": [],
             "zoneData": empty_zones,
+            "pitchZoneData": {
+                "total": 0,
+                "zones": {},
+                "topCombos": [],
+            },
         }
 
     result_counts = {key: 0 for key in RESULT_ORDER}
@@ -528,6 +533,13 @@ def summarize_rows(rows):
         z: {
             "total": 0, "ball": 0, "called_strike": 0, "swinging_strike": 0,
             "foul": 0, "in_play_out": 0, "in_play_hit": 0
+        }
+        for z in DISPLAY_ZONES
+    }
+    pitch_zone_counts = {
+        z: {
+            "total": 0,
+            "pitchTypes": {},
         }
         for z in DISPLAY_ZONES
     }
@@ -611,6 +623,10 @@ def summarize_rows(rows):
         if zone_num in zones:
             zones[zone_num]["total"] += 1
             zones[zone_num][result] += 1
+            pitch_zone_counts[zone_num]["total"] += 1
+            pitch_zone_counts[zone_num]["pitchTypes"][pitch_type] = (
+                pitch_zone_counts[zone_num]["pitchTypes"].get(pitch_type, 0) + 1
+            )
 
     swings = result_counts["swinging_strike"] + result_counts["foul"] + result_counts["in_play_out"] + result_counts["in_play_hit"]
     in_play = result_counts["in_play_out"] + result_counts["in_play_hit"]
@@ -664,6 +680,43 @@ def summarize_rows(rows):
             "foulRate": data["foul"] / zone_total if zone_total else 0,
         }
 
+    pitch_zone_data = {}
+    pitch_zone_combos = []
+    for zone_num, data in pitch_zone_counts.items():
+        zone_total = data["total"]
+        pitch_types_in_zone = [
+            {
+                "pitchType": pitch_type,
+                "count": count,
+                "pct": pct(count, zone_total),
+                "overallPct": pct(count, total),
+            }
+            for pitch_type, count in data["pitchTypes"].items()
+        ]
+        pitch_types_in_zone.sort(key=lambda item: item["count"], reverse=True)
+        top_pitch = pitch_types_in_zone[0] if pitch_types_in_zone else None
+
+        pitch_zone_data[zone_num] = {
+            "zone": zone_num,
+            "total": zone_total,
+            "pct": pct(zone_total, total),
+            "topPitchType": top_pitch["pitchType"] if top_pitch else None,
+            "topPitchTypeCount": top_pitch["count"] if top_pitch else 0,
+            "topPitchTypePct": top_pitch["pct"] if top_pitch else 0,
+            "pitchTypes": pitch_types_in_zone,
+        }
+
+        for item in pitch_types_in_zone:
+            pitch_zone_combos.append({
+                "zone": zone_num,
+                "pitchType": item["pitchType"],
+                "count": item["count"],
+                "zonePct": item["pct"],
+                "overallPct": item["overallPct"],
+            })
+
+    pitch_zone_combos.sort(key=lambda item: item["count"], reverse=True)
+
     return {
         "total": total,
         "summaryStats": {
@@ -677,6 +730,11 @@ def summarize_rows(rows):
         "resultData": result_data,
         "pitchTypeData": pitch_type_data,
         "zoneData": zone_data,
+        "pitchZoneData": {
+            "total": total,
+            "zones": pitch_zone_data,
+            "topCombos": pitch_zone_combos[:8],
+        },
     }
 
 @app.on_event("startup")
