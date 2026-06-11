@@ -3,6 +3,7 @@ import pandas as pd
 from pybaseball import statcast
 import pybaseball
 import datetime
+import calendar
 import time
 import os
 
@@ -31,9 +32,10 @@ def create_database():
                 if month == 3:
                     year_periods.append((f"{year}-03-20", f"{year}-03-31"))
                 else:
+                    month_end = calendar.monthrange(year, month)[1]
                     year_periods.extend([
                         (f"{year}-{month:02d}-01", f"{year}-{month:02d}-15"),
-                        (f"{year}-{month:02d}-16", f"{year}-{month:02d}-28")
+                        (f"{year}-{month:02d}-16", f"{year}-{month:02d}-{month_end:02d}")
                     ])
             periods.append((year, year_periods))
 
@@ -80,7 +82,8 @@ def create_database():
                         'inning_topbot', 'delta_run_exp', 'delta_home_win_exp',
                         'home_win_exp', 'bat_win_exp',
                         'release_speed', 'plate_x', 'plate_z', 'description', 'type', 
-                        'zone', 'player_name', 'pitcher', 'batter', 'events'
+                        'zone', 'player_name', 'pitcher', 'batter', 'events',
+                        'launch_speed', 'launch_angle', 'bb_type'
                     ]
                     
                     # 只選取存在的欄位

@@ -37,6 +37,9 @@ OUT_EVENTS = {
 
 RESULT_ORDER = ["ball", "called_strike", "swinging_strike", "foul", "in_play_out", "in_play_hit"]
 DISPLAY_ZONES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14]
+LOCATION_X_RANGE = (-2.6, 2.6)
+LOCATION_Z_RANGE = (0.4, 5.2)
+LOCATION_GRID_SIZE = 36
 OUTCOME_ORDER = [
     "BB", "HBP", "1B", "2B", "3B", "HR", "K", "Out", "DP", "FC", "ROE",
     "Ball", "Called Strike", "Swinging Strike", "Foul", "In Play", "Other",
@@ -525,6 +528,12 @@ def summarize_rows(rows):
                 "zones": {},
                 "topCombos": [],
             },
+            "pitchLocationData": {
+                "total": 0,
+                "xRange": LOCATION_X_RANGE,
+                "zRange": LOCATION_Z_RANGE,
+                "cells": [],
+            },
         }
 
     result_counts = {key: 0 for key in RESULT_ORDER}
@@ -543,6 +552,10 @@ def summarize_rows(rows):
         }
         for z in DISPLAY_ZONES
     }
+    location_counts = {}
+    location_points = []
+    location_pitch_type_counts = {}
+    location_total = 0
 
     for row in rows:
         row_dict = dict(row)
@@ -627,6 +640,51 @@ def summarize_rows(rows):
             pitch_zone_counts[zone_num]["pitchTypes"][pitch_type] = (
                 pitch_zone_counts[zone_num]["pitchTypes"].get(pitch_type, 0) + 1
             )
+
+        try:
+            plate_x = float(row_dict.get("plate_x"))
+            plate_z = float(row_dict.get("plate_z"))
+        except (TypeError, ValueError):
+            plate_x = None
+            plate_z = None
+
+        if plate_x is not None and plate_z is not None:
+            min_x, max_x = LOCATION_X_RANGE
+            min_z, max_z = LOCATION_Z_RANGE
+            if min_x <= plate_x <= max_x and min_z <= plate_z <= max_z:
+                x_idx = min(
+                    LOCATION_GRID_SIZE - 1,
+                    max(0, int(((plate_x - min_x) / (max_x - min_x)) * LOCATION_GRID_SIZE)),
+                )
+                z_idx = min(
+                    LOCATION_GRID_SIZE - 1,
+                    max(0, int(((plate_z - min_z) / (max_z - min_z)) * LOCATION_GRID_SIZE)),
+                )
+                location_counts[(x_idx, z_idx)] = location_counts.get((x_idx, z_idx), 0) + 1
+                batter_id = row_dict.get("batter")
+                pitcher_id = row_dict.get("pitcher")
+                location_points.append({
+                    "x": plate_x,
+                    "z": plate_z,
+                    "pitchType": pitch_type,
+                    "batterId": str(batter_id) if batter_id is not None else None,
+                    "pitcherId": str(pitcher_id) if pitcher_id is not None else None,
+                    "batterName": batter_name_map.get(str(batter_id), str(batter_id)) if batter_id is not None else None,
+                    "pitcherName": pitcher_name_map.get(str(pitcher_id), str(pitcher_id)) if pitcher_id is not None else None,
+                    "gameDate": row_dict.get("game_date"),
+                    "releaseSpeed": row_dict.get("release_speed"),
+                    "launchSpeed": row_dict.get("launch_speed"),
+                    "launchAngle": row_dict.get("launch_angle"),
+                    "inning": row_dict.get("inning"),
+                    "balls": row_dict.get("balls"),
+                    "strikes": row_dict.get("strikes"),
+                    "outs": row_dict.get("outs_when_up"),
+                    "events": row_dict.get("events"),
+                    "description": row_dict.get("description"),
+                    "contactType": row_dict.get("bb_type"),
+                })
+                location_pitch_type_counts[pitch_type] = location_pitch_type_counts.get(pitch_type, 0) + 1
+                location_total += 1
 
     swings = result_counts["swinging_strike"] + result_counts["foul"] + result_counts["in_play_out"] + result_counts["in_play_hit"]
     in_play = result_counts["in_play_out"] + result_counts["in_play_hit"]
@@ -717,6 +775,47 @@ def summarize_rows(rows):
 
     pitch_zone_combos.sort(key=lambda item: item["count"], reverse=True)
 
+    max_location_count = max(location_counts.values()) if location_counts else 0
+    location_cells = []
+    if max_location_count:
+        min_x, max_x = LOCATION_X_RANGE
+        min_z, max_z = LOCATION_Z_RANGE
+        x_step = (max_x - min_x) / LOCATION_GRID_SIZE
+        z_step = (max_z - min_z) / LOCATION_GRID_SIZE
+        for (x_idx, z_idx), count in location_counts.items():
+            intensity = count / max_location_count
+            if intensity < 0.05 and count < 2:
+                continue
+            location_cells.append({
+                "x": round(min_x + (x_idx + 0.5) * x_step, 3),
+                "z": round(min_z + (z_idx + 0.5) * z_step, 3),
+                "count": count,
+                "pct": pct(count, location_total),
+                "intensity": round(intensity, 3),
+            })
+        location_cells.sort(key=lambda item: item["count"], reverse=True)
+    top_location_pitch_types = [
+        pitch_type
+        for pitch_type, _ in sorted(
+            location_pitch_type_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:6]
+    ]
+    filtered_location_points = [
+        point for point in location_points
+        if point["pitchType"] in top_location_pitch_types
+    ]
+    point_limit = 180
+    if len(filtered_location_points) > point_limit:
+        step = len(filtered_location_points) / point_limit
+        sampled_location_points = [
+            filtered_location_points[int(i * step)]
+            for i in range(point_limit)
+        ]
+    else:
+        sampled_location_points = filtered_location_points
+
     return {
         "total": total,
         "summaryStats": {
@@ -734,6 +833,36 @@ def summarize_rows(rows):
             "total": total,
             "zones": pitch_zone_data,
             "topCombos": pitch_zone_combos[:8],
+        },
+        "pitchLocationData": {
+            "total": location_total,
+            "xRange": LOCATION_X_RANGE,
+            "zRange": LOCATION_Z_RANGE,
+            "cells": location_cells[:140],
+            "points": [
+                {
+                    "x": round(point["x"], 3),
+                    "z": round(point["z"], 3),
+                    "pitchType": point["pitchType"],
+                    "batterId": point.get("batterId"),
+                    "pitcherId": point.get("pitcherId"),
+                    "batterName": point.get("batterName"),
+                    "pitcherName": point.get("pitcherName"),
+                    "gameDate": point.get("gameDate"),
+                    "releaseSpeed": point.get("releaseSpeed"),
+                    "launchSpeed": point.get("launchSpeed"),
+                    "launchAngle": point.get("launchAngle"),
+                    "inning": point.get("inning"),
+                    "balls": point.get("balls"),
+                    "strikes": point.get("strikes"),
+                    "outs": point.get("outs"),
+                    "events": point.get("events"),
+                    "description": point.get("description"),
+                    "contactType": point.get("contactType"),
+                }
+                for point in sampled_location_points
+            ],
+            "legendPitchTypes": top_location_pitch_types,
         },
     }
 
@@ -958,7 +1087,11 @@ async def get_pitch_summary(
 
         summary_columns = [
             "pitch_type", "zone", "description", "type", "events",
-            *optional_pitch_columns("stand", "release_speed", "strikes"),
+            *optional_pitch_columns(
+                "stand", "release_speed", "strikes", "plate_x", "plate_z",
+                "pitcher", "batter", "game_date", "launch_speed", "launch_angle",
+                "inning", "balls", "outs_when_up", "bb_type",
+            ),
         ]
 
         query = f"""

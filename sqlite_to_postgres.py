@@ -11,6 +11,7 @@ SQLITE_DB = os.getenv(
 )
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "10000"))
+INSERT_PAGE_SIZE = int(os.getenv("POSTGRES_INSERT_PAGE_SIZE", "5000"))
 
 
 def normalize_database_url(database_url):
@@ -42,6 +43,9 @@ COLUMNS = [
     "release_speed",
     "plate_x",
     "plate_z",
+    "launch_speed",
+    "launch_angle",
+    "bb_type",
     "description",
     "type",
     "zone",
@@ -73,6 +77,9 @@ CREATE TABLE IF NOT EXISTS pitches (
     release_speed DOUBLE PRECISION,
     plate_x DOUBLE PRECISION,
     plate_z DOUBLE PRECISION,
+    launch_speed DOUBLE PRECISION,
+    launch_angle DOUBLE PRECISION,
+    bb_type TEXT,
     description TEXT,
     type TEXT,
     zone INTEGER,
@@ -90,6 +97,59 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_public_filters ON pitches(game_date, pitcher_role, pitch_type, balls, strikes)",
     "CREATE INDEX IF NOT EXISTS idx_stand ON pitches(stand)",
 ]
+
+FLOAT_COLUMNS = {
+    "delta_run_exp",
+    "delta_home_win_exp",
+    "pitcher_wpa",
+    "release_speed",
+    "plate_x",
+    "plate_z",
+    "launch_speed",
+    "launch_angle",
+}
+
+INTEGER_COLUMNS = {
+    "balls",
+    "strikes",
+    "on_1b",
+    "on_2b",
+    "on_3b",
+    "outs_when_up",
+    "runs_on_pa",
+    "zone",
+    "pitcher",
+    "batter",
+    "is_out",
+}
+
+
+def decode_numeric_blob(value):
+    if value is None or not isinstance(value, (bytes, bytearray, memoryview)):
+        return value
+
+    raw = bytes(value)
+    try:
+        return float(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        pass
+
+    if len(raw) in {1, 2, 4, 8}:
+        return float(int.from_bytes(raw, byteorder="little", signed=True))
+
+    return None
+
+
+def clean_value(column, value):
+    value = decode_numeric_blob(value)
+    if value is None:
+        return None
+
+    if column in FLOAT_COLUMNS:
+        return float(value)
+    if column in INTEGER_COLUMNS:
+        return int(value)
+    return value
 
 
 def main():
@@ -130,8 +190,11 @@ def main():
             if not rows:
                 break
 
-            values = [tuple(row[column] for column in COLUMNS) for row in rows]
-            execute_values(cursor, insert_sql, values, page_size=BATCH_SIZE)
+            values = [
+                tuple(clean_value(column, row[column]) for column in COLUMNS)
+                for row in rows
+            ]
+            execute_values(cursor, insert_sql, values, page_size=INSERT_PAGE_SIZE)
             target.commit()
 
             imported += len(rows)
@@ -139,9 +202,11 @@ def main():
 
         for sql in INDEXES:
             print(sql)
+            cursor.execute("SET statement_timeout = 0")
             cursor.execute(sql)
             target.commit()
 
+        cursor.execute("SET statement_timeout = 0")
         cursor.execute("ANALYZE pitches")
         target.commit()
 

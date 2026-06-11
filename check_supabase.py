@@ -27,6 +27,9 @@ REQUIRED_PITCH_COLUMNS = {
     "pitcher",
     "batter",
     "events",
+    "launch_speed",
+    "launch_angle",
+    "bb_type",
 }
 
 
