@@ -12,12 +12,16 @@ SQLITE_DB = os.getenv(
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "10000"))
 INSERT_PAGE_SIZE = int(os.getenv("POSTGRES_INSERT_PAGE_SIZE", "5000"))
+RESUME_IMPORT = os.getenv("POSTGRES_IMPORT_RESUME", "").lower() in {"1", "true", "yes"}
 
 
 def normalize_database_url(database_url):
     if database_url and database_url.startswith("DATABASE_URL="):
         print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
-        return database_url.split("=", 1)[1].strip().strip("'\"")
+        database_url = database_url.split("=", 1)[1].strip().strip("'\"")
+    if database_url and "sslmode=" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        return f"{database_url}{separator}sslmode=require"
     return database_url
 
 
@@ -152,6 +156,11 @@ def clean_value(column, value):
     return value
 
 
+def chunked(items, size):
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
 def main():
     if not DATABASE_URL:
         raise RuntimeError("Set DATABASE_URL to your PostgreSQL connection string first.")
@@ -166,10 +175,19 @@ def main():
     target.autocommit = False
 
     with target.cursor() as cursor:
-        cursor.execute("DROP TABLE IF EXISTS player_names")
-        cursor.execute("DROP TABLE IF EXISTS pitches")
-        cursor.execute(CREATE_TABLE_SQL)
-        target.commit()
+        if RESUME_IMPORT:
+            cursor.execute(CREATE_TABLE_SQL)
+            target.commit()
+            cursor.execute("SELECT COUNT(*) FROM pitches")
+            imported = cursor.fetchone()[0]
+            print(f"Resuming from existing PostgreSQL rows: {imported:,}/{total:,}")
+        else:
+            cursor.execute("DROP TABLE IF EXISTS player_names")
+            cursor.execute("DROP TABLE IF EXISTS pitcher_standard_stats")
+            cursor.execute("DROP TABLE IF EXISTS pitches")
+            cursor.execute(CREATE_TABLE_SQL)
+            target.commit()
+            imported = 0
 
     source_columns = {
         row[1]
@@ -179,11 +197,12 @@ def main():
         column if column in source_columns else f"NULL AS {column}"
         for column in COLUMNS
     ]
-    select_sql = f"SELECT {', '.join(select_columns)} FROM pitches"
+    select_sql = f"SELECT {', '.join(select_columns)} FROM pitches ORDER BY rowid"
+    if imported:
+        select_sql = f"{select_sql} LIMIT -1 OFFSET {imported}"
     insert_sql = f"INSERT INTO pitches ({', '.join(COLUMNS)}) VALUES %s"
     source_cursor = source.execute(select_sql)
 
-    imported = 0
     with target.cursor() as cursor:
         while True:
             rows = source_cursor.fetchmany(BATCH_SIZE)
@@ -194,11 +213,12 @@ def main():
                 tuple(clean_value(column, row[column]) for column in COLUMNS)
                 for row in rows
             ]
-            execute_values(cursor, insert_sql, values, page_size=INSERT_PAGE_SIZE)
-            target.commit()
 
-            imported += len(rows)
-            print(f"Imported {imported:,}/{total:,} rows")
+            for value_page in chunked(values, INSERT_PAGE_SIZE):
+                execute_values(cursor, insert_sql, value_page, page_size=len(value_page))
+                target.commit()
+                imported += len(value_page)
+                print(f"Imported {imported:,}/{total:,} rows")
 
         for sql in INDEXES:
             print(sql)

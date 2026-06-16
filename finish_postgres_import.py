@@ -15,7 +15,10 @@ INDEXES = [
 
 def normalize_database_url(database_url):
     if database_url and database_url.startswith("DATABASE_URL="):
-        return database_url.split("=", 1)[1].strip().strip("'\"")
+        database_url = database_url.split("=", 1)[1].strip().strip("'\"")
+    if database_url and "sslmode=" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        return f"{database_url}{separator}sslmode=require"
     return database_url
 
 

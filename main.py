@@ -28,6 +28,7 @@ batter_name_map = {}
 pitcher_name_map = {}
 TABLE_NAME = "pitches"
 PITCH_COLUMNS = set()
+TABLE_NAMES = set()
 
 OUT_EVENTS = {
     "field_out", "strikeout", "force_out", "grounded_into_double_play",
@@ -99,6 +100,15 @@ def fetch_all_dicts(query, params=None):
     cursor.close()
     conn.close()
     return [dict(row) for row in rows]
+
+def fetch_one_dict(query, params=None):
+    conn = connect_db(dict_rows=True)
+    cursor = conn.cursor()
+    cursor.execute(query, params or [])
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return dict(row) if row else None
 
 def table_names(conn):
     cursor = conn.cursor()
@@ -215,8 +225,96 @@ def pct(part, total):
 def avg(total, count, digits=1):
     return round(total / count, digits) if count else None
 
+def sum_nullable(rows, key):
+    values = [row.get(key) for row in rows if row.get(key) is not None]
+    return sum(values) if values else None
+
+def avg_nullable(rows, key, digits=3):
+    values = [row.get(key) for row in rows if row.get(key) is not None]
+    return round(sum(values) / len(values), digits) if values else None
+
+def outs_on_play(events):
+    if events in {"grounded_into_double_play", "double_play", "strikeout_double_play", "sac_fly_double_play", "sac_bunt_double_play"}:
+        return 2
+    if events in OUT_EVENTS or events == "strikeout":
+        return 1
+    return 0
+
 def optional_pitch_columns(*columns):
     return [col for col in columns if col in PITCH_COLUMNS]
+
+def fetch_pitcher_standard_stats(pitcher_id=None, year=None):
+    if not has_filter_value(pitcher_id) or "pitcher_standard_stats" not in TABLE_NAMES:
+        return None
+
+    placeholder = db_placeholder()
+    pitcher_ids = [int(x) for x in str(pitcher_id).split(",") if str(x).strip().isdigit()]
+    if not pitcher_ids:
+        return None
+
+    conds = [f"pitcher IN ({','.join([placeholder] * len(pitcher_ids))})"]
+    params = list(pitcher_ids)
+    if has_filter_value(year):
+        conds.append(f"season = {placeholder}")
+        params.append(int(year))
+
+    rows = fetch_all_dicts(
+        f"""
+        SELECT season, pitcher, player_name, team, league, bf, w, l, era, g, gs, sv,
+               ip, h, r, er, hr, bb, so, whip
+        FROM pitcher_standard_stats
+        WHERE {" AND ".join(conds)}
+        """,
+        params,
+    )
+    if not rows:
+        return None
+
+    if len(rows) == 1:
+        row = rows[0]
+        return {
+            "source": "mlb_stats_api",
+            "season": row.get("season"),
+            "team": row.get("team"),
+            "league": row.get("league"),
+            "bf": row.get("bf"),
+            "w": row.get("w"),
+            "l": row.get("l"),
+            "era": row.get("era"),
+            "g": row.get("g"),
+            "gs": row.get("gs"),
+            "sv": row.get("sv"),
+            "ip": row.get("ip"),
+            "h": row.get("h"),
+            "r": row.get("r"),
+            "er": row.get("er"),
+            "hr": row.get("hr"),
+            "bb": row.get("bb"),
+            "so": row.get("so"),
+            "whip": row.get("whip"),
+        }
+
+    return {
+        "source": "mlb_stats_api",
+        "season": "ALL",
+        "team": "Multiple",
+        "league": "",
+        "bf": sum_nullable(rows, "bf"),
+        "w": sum_nullable(rows, "w"),
+        "l": sum_nullable(rows, "l"),
+        "era": avg_nullable(rows, "era", 2),
+        "g": sum_nullable(rows, "g"),
+        "gs": sum_nullable(rows, "gs"),
+        "sv": sum_nullable(rows, "sv"),
+        "ip": None,
+        "h": sum_nullable(rows, "h"),
+        "r": sum_nullable(rows, "r"),
+        "er": sum_nullable(rows, "er"),
+        "hr": sum_nullable(rows, "hr"),
+        "bb": sum_nullable(rows, "bb"),
+        "so": sum_nullable(rows, "so"),
+        "whip": avg_nullable(rows, "whip", 2),
+    }
 
 def result_type(row):
     pitch_type = row.get("type")
@@ -520,6 +618,7 @@ def summarize_rows(rows):
         return {
             "total": 0,
             "summaryStats": None,
+            "standardStats": None,
             "resultData": [],
             "pitchTypeData": [],
             "zoneData": empty_zones,
@@ -556,6 +655,7 @@ def summarize_rows(rows):
     location_points = []
     location_pitch_type_counts = {}
     location_total = 0
+    game_dates = set()
 
     for row in rows:
         row_dict = dict(row)
@@ -564,6 +664,9 @@ def summarize_rows(rows):
             continue
 
         result_counts[result] += 1
+        game_date = row_dict.get("game_date")
+        if game_date:
+            game_dates.add(game_date)
 
         pitch_type = row_dict.get("pitch_type") or "Unknown"
         if pitch_type not in pitch_types:
@@ -572,7 +675,8 @@ def summarize_rows(rows):
                 "foul": 0, "in_play_out": 0, "in_play_hit": 0,
                 "rhb": 0, "lhb": 0, "speedSum": 0, "speedCount": 0,
                 "pa": 0, "ab": 0, "h": 0, "single": 0, "double": 0,
-                "triple": 0, "hr": 0, "so": 0, "bbe": 0, "totalBases": 0,
+                "triple": 0, "hr": 0, "so": 0, "bb": 0, "hbp": 0, "outs": 0, "runs": 0,
+                "bbe": 0, "totalBases": 0,
                 "wobaNumerator": 0, "wobaDenominator": 0,
                 "twoStrikePitches": 0, "putAway": 0
             }
@@ -596,6 +700,11 @@ def summarize_rows(rows):
         events = row_dict.get("events") or ""
         if events:
             pitch_types[pitch_type]["pa"] += 1
+            pitch_types[pitch_type]["outs"] += outs_on_play(events)
+            try:
+                pitch_types[pitch_type]["runs"] += int(row_dict.get("runs_on_pa") or 0)
+            except (TypeError, ValueError):
+                pass
             if events in AT_BAT_EVENTS:
                 pitch_types[pitch_type]["ab"] += 1
             if events in HIT_EVENTS:
@@ -610,6 +719,10 @@ def summarize_rows(rows):
                 pitch_types[pitch_type]["hr"] += 1
             if events == "strikeout":
                 pitch_types[pitch_type]["so"] += 1
+            if events in {"walk", "intent_walk"}:
+                pitch_types[pitch_type]["bb"] += 1
+            if events == "hit_by_pitch":
+                pitch_types[pitch_type]["hbp"] += 1
             if events in TOTAL_BASES_BY_EVENT:
                 pitch_types[pitch_type]["totalBases"] += TOTAL_BASES_BY_EVENT[events]
             if events in WOBA_WEIGHTS:
@@ -714,7 +827,18 @@ def summarize_rows(rows):
             "triples": data["triple"],
             "hr": data["hr"],
             "so": data["so"],
+            "bb": data["bb"],
+            "hbp": data["hbp"],
+            "outs": data["outs"],
+            "runs": data["runs"],
             "bbe": data["bbe"],
+            "totalBases": data["totalBases"],
+            "wobaNumerator": data["wobaNumerator"],
+            "wobaDenominator": data["wobaDenominator"],
+            "swingAttempts": type_swings,
+            "swingingStrikes": data["swinging_strike"],
+            "twoStrikePitches": data["twoStrikePitches"],
+            "putAway": data["putAway"],
             "ba": avg(data["h"], data["ab"], 3),
             "slg": avg(data["totalBases"], data["ab"], 3),
             "woba": avg(data["wobaNumerator"], data["wobaDenominator"], 3),
@@ -826,6 +950,9 @@ def summarize_rows(rows):
             "cswRate": pct(result_counts["called_strike"] + result_counts["swinging_strike"], total),
             "babip": pct(result_counts["in_play_hit"], in_play),
         },
+        "standardStats": {
+            "games": len(game_dates),
+        },
         "resultData": result_data,
         "pitchTypeData": pitch_type_data,
         "zoneData": zone_data,
@@ -868,7 +995,7 @@ def summarize_rows(rows):
 
 @app.on_event("startup")
 async def startup_event():
-    global TABLE_NAME, PITCH_COLUMNS
+    global TABLE_NAME, PITCH_COLUMNS, TABLE_NAMES
 
     if not using_postgres():
         # --- 1. 下載邏輯 (使用 Dropbox 直連) ---
@@ -909,6 +1036,7 @@ async def startup_event():
     try:
         conn = connect_db()
         tables = table_names(conn)
+        TABLE_NAMES = set(tables)
         if "pitches" in tables: 
             TABLE_NAME = "pitches"
         elif tables: 
@@ -1090,7 +1218,7 @@ async def get_pitch_summary(
             *optional_pitch_columns(
                 "stand", "release_speed", "strikes", "plate_x", "plate_z",
                 "pitcher", "batter", "game_date", "launch_speed", "launch_angle",
-                "inning", "balls", "outs_when_up", "bb_type",
+                "inning", "balls", "outs_when_up", "bb_type", "runs_on_pa",
             ),
         ]
 
@@ -1102,7 +1230,11 @@ async def get_pitch_summary(
 
         rows = fetch_all_dicts(query, params)
 
-        return summarize_rows(rows)
+        summary = summarize_rows(rows)
+        pitcher_standard = fetch_pitcher_standard_stats(pitcherId, year)
+        if pitcher_standard:
+            summary["standardStats"] = pitcher_standard
+        return summary
 
     except Exception as e:
         print(f"❌ Summary API 錯誤: {e}")
