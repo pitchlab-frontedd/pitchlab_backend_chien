@@ -19,6 +19,7 @@ def main():
         **os.environ,
         "POSTGRES_IMPORT_BATCH_SIZE": os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "50000"),
         "POSTGRES_INSERT_PAGE_SIZE": os.getenv("POSTGRES_INSERT_PAGE_SIZE", "5000"),
+        "POSTGRES_IMPORT_RESUME": "0",
     }
 
     for step in STEPS:
