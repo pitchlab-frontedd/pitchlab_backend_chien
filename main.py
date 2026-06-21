@@ -348,8 +348,12 @@ def build_pitch_filters(
     on1b=None,
     on2b=None,
     on3b=None,
+    table_alias=None,
 ):
     placeholder = db_placeholder()
+    def qcol(name):
+        return f"{table_alias}.{name}" if table_alias else name
+
     null_vals = {"", "none", "null", "undefined", "all"}
     conds = []
     params = []
@@ -372,47 +376,47 @@ def build_pitch_filters(
     ]
 
     if y.upper() != "ALL":
-        conds.append(f"substr(game_date, 1, 4) = {placeholder}")
+        conds.append(f"substr({qcol('game_date')}, 1, 4) = {placeholder}")
         params.append(y)
     if p_id.lower() not in null_vals and p_id != "0":
         pitcher_ids = [x.strip() for x in p_id.split(",") if x.strip().isdigit()]
         if pitcher_ids:
-            conds.append(f"pitcher IN ({','.join([placeholder] * len(pitcher_ids))})")
+            conds.append(f"{qcol('pitcher')} IN ({','.join([placeholder] * len(pitcher_ids))})")
             params.extend(pitcher_ids)
     if b_id.lower() not in null_vals and b_id != "0":
-        conds.append(f"batter = {placeholder}")
+        conds.append(f"{qcol('batter')} = {placeholder}")
         params.append(b_id)
     if role.lower() not in null_vals:
-        conds.append(f"pitcher_role = {placeholder}")
+        conds.append(f"{qcol('pitcher_role')} = {placeholder}")
         params.append(role)
     if hand.lower() not in null_vals:
-        conds.append(f"p_throws = {placeholder}")
+        conds.append(f"{qcol('p_throws')} = {placeholder}")
         params.append(hand)
     if batter_hand.lower() not in null_vals:
-        conds.append(f"stand = {placeholder}")
+        conds.append(f"{qcol('stand')} = {placeholder}")
         params.append(batter_hand)
     if out_count and out_count.lower() not in null_vals:
-        conds.append(f"outs_when_up = {placeholder}")
+        conds.append(f"{qcol('outs_when_up')} = {placeholder}")
         params.append(out_count)
     if z and z.lower() not in null_vals:
         zones = [int(x) for x in z.split(",") if x.strip().isdigit()]
         if zones:
-            conds.append(f"zone IN ({','.join([placeholder] * len(zones))})")
+            conds.append(f"{qcol('zone')} IN ({','.join([placeholder] * len(zones))})")
             params.extend(zones)
     if pt and pt.lower() not in null_vals:
         pitch_types = [x.strip() for x in pt.split(",") if x.strip()]
         if pitch_types:
-            conds.append(f"pitch_type IN ({','.join([placeholder] * len(pitch_types))})")
+            conds.append(f"{qcol('pitch_type')} IN ({','.join([placeholder] * len(pitch_types))})")
             params.extend(pitch_types)
     if b and b.lower() not in null_vals:
-        conds.append(f"balls = {placeholder}")
+        conds.append(f"{qcol('balls')} = {placeholder}")
         params.append(b)
     if s and s.lower() not in null_vals:
-        conds.append(f"strikes = {placeholder}")
+        conds.append(f"{qcol('strikes')} = {placeholder}")
         params.append(s)
-    for col, val in runner_filters:
+    for runner_col, val in runner_filters:
         if val and val.lower() not in null_vals:
-            conds.append(f"COALESCE({col}, 0) = {placeholder}")
+            conds.append(f"COALESCE({qcol(runner_col)}, 0) = {placeholder}")
             params.append(1 if val == "1" else 0)
 
     if not conds:
@@ -993,6 +997,226 @@ def summarize_rows(rows):
         },
     }
 
+def summarize_next_pitch_rows(rows):
+    total = len(rows)
+    pitch_zone_counts = {
+        z: {
+            "total": 0,
+            "pitchTypes": {},
+        }
+        for z in DISPLAY_ZONES
+    }
+    location_counts = {}
+    location_points = []
+    location_pitch_type_counts = {}
+
+    for row in rows:
+        row_dict = dict(row)
+        pitch_type = row_dict.get("pitch_type") or "Unknown"
+        try:
+            zone_num = int(row_dict.get("zone"))
+        except (TypeError, ValueError):
+            zone_num = 0
+
+        if zone_num in pitch_zone_counts:
+            pitch_zone_counts[zone_num]["total"] += 1
+            pitch_zone_counts[zone_num]["pitchTypes"][pitch_type] = (
+                pitch_zone_counts[zone_num]["pitchTypes"].get(pitch_type, 0) + 1
+            )
+
+        try:
+            plate_x = float(row_dict.get("plate_x"))
+            plate_z = float(row_dict.get("plate_z"))
+        except (TypeError, ValueError):
+            plate_x = None
+            plate_z = None
+
+        if plate_x is None or plate_z is None:
+            continue
+
+        min_x, max_x = LOCATION_X_RANGE
+        min_z, max_z = LOCATION_Z_RANGE
+        if not (min_x <= plate_x <= max_x and min_z <= plate_z <= max_z):
+            continue
+
+        x_idx = min(
+            LOCATION_GRID_SIZE - 1,
+            max(0, int(((plate_x - min_x) / (max_x - min_x)) * LOCATION_GRID_SIZE)),
+        )
+        z_idx = min(
+            LOCATION_GRID_SIZE - 1,
+            max(0, int(((plate_z - min_z) / (max_z - min_z)) * LOCATION_GRID_SIZE)),
+        )
+        location_counts[(x_idx, z_idx)] = location_counts.get((x_idx, z_idx), 0) + 1
+        batter_id = row_dict.get("batter")
+        pitcher_id = row_dict.get("pitcher")
+        location_points.append({
+            "x": plate_x,
+            "z": plate_z,
+            "pitchType": pitch_type,
+            "batterId": str(batter_id) if batter_id is not None else None,
+            "pitcherId": str(pitcher_id) if pitcher_id is not None else None,
+            "batterName": batter_name_map.get(str(batter_id), str(batter_id)) if batter_id is not None else None,
+            "pitcherName": pitcher_name_map.get(str(pitcher_id), str(pitcher_id)) if pitcher_id is not None else None,
+            "gameDate": row_dict.get("game_date"),
+            "releaseSpeed": row_dict.get("release_speed"),
+            "launchSpeed": row_dict.get("launch_speed"),
+            "launchAngle": row_dict.get("launch_angle"),
+            "inning": row_dict.get("inning"),
+            "balls": row_dict.get("balls"),
+            "strikes": row_dict.get("strikes"),
+            "outs": row_dict.get("outs_when_up"),
+            "events": row_dict.get("events"),
+            "description": row_dict.get("description"),
+            "contactType": row_dict.get("bb_type"),
+        })
+        location_pitch_type_counts[pitch_type] = location_pitch_type_counts.get(pitch_type, 0) + 1
+
+    pitch_zone_data = {}
+    pitch_zone_combos = []
+    for zone_num, data in pitch_zone_counts.items():
+        zone_total = data["total"]
+        pitch_types_in_zone = [
+            {
+                "pitchType": pitch_type,
+                "count": count,
+                "pct": pct(count, zone_total),
+                "overallPct": pct(count, total),
+            }
+            for pitch_type, count in data["pitchTypes"].items()
+        ]
+        pitch_types_in_zone.sort(key=lambda item: item["count"], reverse=True)
+        top_pitch = pitch_types_in_zone[0] if pitch_types_in_zone else None
+
+        pitch_zone_data[zone_num] = {
+            "zone": zone_num,
+            "total": zone_total,
+            "pct": pct(zone_total, total),
+            "topPitchType": top_pitch["pitchType"] if top_pitch else None,
+            "topPitchTypeCount": top_pitch["count"] if top_pitch else 0,
+            "topPitchTypePct": top_pitch["pct"] if top_pitch else 0,
+            "pitchTypes": pitch_types_in_zone,
+        }
+
+        for item in pitch_types_in_zone:
+            pitch_zone_combos.append({
+                "zone": zone_num,
+                "pitchType": item["pitchType"],
+                "count": item["count"],
+                "zonePct": item["pct"],
+                "overallPct": item["overallPct"],
+            })
+
+    pitch_zone_combos.sort(key=lambda item: item["count"], reverse=True)
+
+    max_location_count = max(location_counts.values()) if location_counts else 0
+    location_cells = []
+    if max_location_count:
+        min_x, max_x = LOCATION_X_RANGE
+        min_z, max_z = LOCATION_Z_RANGE
+        x_step = (max_x - min_x) / LOCATION_GRID_SIZE
+        z_step = (max_z - min_z) / LOCATION_GRID_SIZE
+        for (x_idx, z_idx), count in location_counts.items():
+            intensity = count / max_location_count
+            if intensity < 0.05 and count < 2:
+                continue
+            location_cells.append({
+                "x": round(min_x + (x_idx + 0.5) * x_step, 3),
+                "z": round(min_z + (z_idx + 0.5) * z_step, 3),
+                "count": count,
+                "pct": pct(count, len(location_points)),
+                "intensity": round(intensity, 3),
+            })
+        location_cells.sort(key=lambda item: item["count"], reverse=True)
+
+    top_location_pitch_types = [
+        pitch_type
+        for pitch_type, _ in sorted(
+            location_pitch_type_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:6]
+    ]
+    filtered_location_points = [
+        point for point in location_points
+        if point["pitchType"] in top_location_pitch_types
+    ]
+    point_limit = 180
+    if len(filtered_location_points) > point_limit:
+        step = len(filtered_location_points) / point_limit
+        sampled_location_points = [
+            filtered_location_points[int(i * step)]
+            for i in range(point_limit)
+        ]
+    else:
+        sampled_location_points = filtered_location_points
+
+    return {
+        "pitchZoneData": {
+            "total": total,
+            "zones": pitch_zone_data,
+            "topCombos": pitch_zone_combos[:8],
+            "source": "next_pitch",
+        },
+        "pitchLocationData": {
+            "total": len(location_points),
+            "xRange": LOCATION_X_RANGE,
+            "zRange": LOCATION_Z_RANGE,
+            "cells": location_cells[:140],
+            "points": [
+                {
+                    "x": round(point["x"], 3),
+                    "z": round(point["z"], 3),
+                    "pitchType": point["pitchType"],
+                    "batterId": point.get("batterId"),
+                    "pitcherId": point.get("pitcherId"),
+                    "batterName": point.get("batterName"),
+                    "pitcherName": point.get("pitcherName"),
+                    "gameDate": point.get("gameDate"),
+                    "releaseSpeed": point.get("releaseSpeed"),
+                    "launchSpeed": point.get("launchSpeed"),
+                    "launchAngle": point.get("launchAngle"),
+                    "inning": point.get("inning"),
+                    "balls": point.get("balls"),
+                    "strikes": point.get("strikes"),
+                    "outs": point.get("outs"),
+                    "events": point.get("events"),
+                    "description": point.get("description"),
+                    "contactType": point.get("contactType"),
+                }
+                for point in sampled_location_points
+            ],
+            "legendPitchTypes": top_location_pitch_types,
+            "source": "next_pitch",
+        },
+    }
+
+def fetch_next_pitch_summary(where, params):
+    sequence_columns = {"game_pk", "at_bat_number", "pitch_number"}
+    if not sequence_columns.issubset(PITCH_COLUMNS):
+        return None
+
+    next_columns = [
+        "pitch_type", "zone", "plate_x", "plate_z",
+        *optional_pitch_columns(
+            "batter", "pitcher", "game_date", "release_speed", "launch_speed",
+            "launch_angle", "inning", "balls", "strikes", "outs_when_up",
+            "events", "description", "bb_type",
+        ),
+    ]
+    select_columns = [f"n.{column} AS {column}" for column in next_columns]
+    query = f"""
+        SELECT {", ".join(select_columns)}
+        FROM {TABLE_NAME} p
+        JOIN {TABLE_NAME} n
+          ON n.game_pk = p.game_pk
+         AND n.at_bat_number = p.at_bat_number
+         AND n.pitch_number = p.pitch_number + 1
+        {where}
+    """
+    rows = fetch_all_dicts(query, params)
+    return summarize_next_pitch_rows(rows)
+
 @app.on_event("startup")
 async def startup_event():
     global TABLE_NAME, PITCH_COLUMNS, TABLE_NAMES
@@ -1209,6 +1433,23 @@ async def get_pitch_summary(
             on2b=on2b,
             on3b=on3b,
         )
+        next_where, next_params = build_pitch_filters(
+            year=year,
+            pitcherId=pitcherId,
+            batterId=batterId,
+            pitcherRole=pitcherRole,
+            zone=zone,
+            pitchType=pitchType,
+            balls=balls,
+            strikes=strikes,
+            pitcherHand=pitcherHand,
+            batterHand=batterHand,
+            outs=outs,
+            on1b=on1b,
+            on2b=on2b,
+            on3b=on3b,
+            table_alias="p",
+        )
 
         if where is None:
             return summarize_rows([])
@@ -1231,6 +1472,11 @@ async def get_pitch_summary(
         rows = fetch_all_dicts(query, params)
 
         summary = summarize_rows(rows)
+        next_pitch_summary = fetch_next_pitch_summary(next_where, next_params)
+        if next_pitch_summary:
+            summary["pitchZoneData"] = next_pitch_summary["pitchZoneData"]
+            summary["pitchLocationData"] = next_pitch_summary["pitchLocationData"]
+
         pitcher_standard = fetch_pitcher_standard_stats(pitcherId, year)
         if pitcher_standard:
             summary["standardStats"] = pitcher_standard

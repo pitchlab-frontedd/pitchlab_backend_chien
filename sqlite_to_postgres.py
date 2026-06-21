@@ -28,6 +28,9 @@ def normalize_database_url(database_url):
 DATABASE_URL = normalize_database_url(DATABASE_URL)
 
 COLUMNS = [
+    "game_pk",
+    "at_bat_number",
+    "pitch_number",
     "game_date",
     "pitch_type",
     "balls",
@@ -62,6 +65,9 @@ COLUMNS = [
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS pitches (
+    game_pk INTEGER,
+    at_bat_number INTEGER,
+    pitch_number INTEGER,
     game_date TEXT,
     pitch_type TEXT,
     balls INTEGER,
@@ -100,6 +106,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_batter ON pitches(batter)",
     "CREATE INDEX IF NOT EXISTS idx_public_filters ON pitches(game_date, pitcher_role, pitch_type, balls, strikes)",
     "CREATE INDEX IF NOT EXISTS idx_stand ON pitches(stand)",
+    "CREATE INDEX IF NOT EXISTS idx_pitch_sequence ON pitches(game_pk, at_bat_number, pitch_number)",
 ]
 
 FLOAT_COLUMNS = {
@@ -116,6 +123,9 @@ FLOAT_COLUMNS = {
 INTEGER_COLUMNS = {
     "balls",
     "strikes",
+    "game_pk",
+    "at_bat_number",
+    "pitch_number",
     "on_1b",
     "on_2b",
     "on_3b",
