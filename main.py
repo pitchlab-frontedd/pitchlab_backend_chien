@@ -32,7 +32,7 @@ TABLE_NAMES = set()
 
 OUT_EVENTS = {
     "field_out", "strikeout", "force_out", "grounded_into_double_play",
-    "fielders_choice", "fielders_choice_out", "double_play",
+    "fielders_choice_out", "double_play",
     "sac_fly", "sac_bunt", "strikeout_double_play"
 }
 
@@ -47,8 +47,17 @@ OUTCOME_ORDER = [
 ]
 
 HIT_EVENTS = {"single", "double", "triple", "home_run"}
+# AT_BAT_EVENTS kept for reference; use AB_EVENTS for official AB counting
 AT_BAT_EVENTS = HIT_EVENTS | OUT_EVENTS | {"strikeout", "field_error"}
+# AB_EVENTS: official at-bat events (excludes sac_fly, sac_bunt per baseball rules)
+AB_EVENTS = HIT_EVENTS | {
+    "field_out", "strikeout", "force_out", "grounded_into_double_play",
+    "fielders_choice", "fielders_choice_out", "double_play",
+    "strikeout_double_play", "field_error"
+}
 ON_BASE_EVENTS = HIT_EVENTS | {"walk", "intent_walk", "hit_by_pitch"}
+# wOBA denominator: AB + uBB + HBP + SF (excludes IBB, sac_bunt)
+WOBA_DENOM_EVENTS = AB_EVENTS | {"walk", "hit_by_pitch", "sac_fly"}
 TOTAL_BASES_BY_EVENT = {
     "single": 1,
     "double": 2,
@@ -57,7 +66,6 @@ TOTAL_BASES_BY_EVENT = {
 }
 WOBA_WEIGHTS = {
     "walk": 0.69,
-    "intent_walk": 0.69,
     "hit_by_pitch": 0.72,
     "single": 0.88,
     "double": 1.25,
@@ -330,7 +338,7 @@ def result_type(row):
     if description == "foul":
         return "foul"
     if pitch_type == "X":
-        return "in_play_out" if events in OUT_EVENTS or "out" in events else "in_play_hit"
+        return "in_play_out" if events in OUT_EVENTS else "in_play_hit"
     return "other"
 
 def build_pitch_filters(
@@ -583,7 +591,7 @@ def summarize_outcomes(rows, wpa_perspective="batter"):
             "avgRunValue": expected_runs,
             "winProbChange": win_prob_change,
             "outRate": pct(
-                data["outcomes"]["K"] + data["outcomes"]["Out"] + data["outcomes"]["DP"] + data["outcomes"]["FC"],
+                data["outcomes"]["K"] + data["outcomes"]["Out"] + data["outcomes"]["DP"],
                 type_total,
             ),
             "outcomes": type_outcomes,
@@ -640,6 +648,7 @@ def summarize_rows(rows):
         }
 
     result_counts = {key: 0 for key in RESULT_ORDER}
+    hr_in_play_count = 0
     pitch_types = {}
     zones = {
         z: {
@@ -704,12 +713,14 @@ def summarize_rows(rows):
         events = row_dict.get("events") or ""
         if events:
             pitch_types[pitch_type]["pa"] += 1
+            if events == "home_run":
+                hr_in_play_count += 1
             pitch_types[pitch_type]["outs"] += outs_on_play(events)
             try:
                 pitch_types[pitch_type]["runs"] += int(row_dict.get("runs_on_pa") or 0)
             except (TypeError, ValueError):
                 pass
-            if events in AT_BAT_EVENTS:
+            if events in AB_EVENTS:
                 pitch_types[pitch_type]["ab"] += 1
             if events in HIT_EVENTS:
                 pitch_types[pitch_type]["h"] += 1
@@ -731,7 +742,7 @@ def summarize_rows(rows):
                 pitch_types[pitch_type]["totalBases"] += TOTAL_BASES_BY_EVENT[events]
             if events in WOBA_WEIGHTS:
                 pitch_types[pitch_type]["wobaNumerator"] += WOBA_WEIGHTS[events]
-            if events in ON_BASE_EVENTS or events in AT_BAT_EVENTS:
+            if events in WOBA_DENOM_EVENTS:
                 pitch_types[pitch_type]["wobaDenominator"] += 1
 
         if result in {"in_play_out", "in_play_hit"}:
@@ -952,7 +963,7 @@ def summarize_rows(rows):
             "swingRate": pct(swings, total),
             "whiffRate": pct(result_counts["swinging_strike"], swings),
             "cswRate": pct(result_counts["called_strike"] + result_counts["swinging_strike"], total),
-            "babip": pct(result_counts["in_play_hit"], in_play),
+            "babip": pct(result_counts["in_play_hit"] - hr_in_play_count, in_play - hr_in_play_count),
         },
         "standardStats": {
             "games": len(game_dates),

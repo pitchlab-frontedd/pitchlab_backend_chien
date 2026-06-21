@@ -95,8 +95,8 @@ def create_database():
 
                     # ✨ 【新增 1】加入 is_out 出局標記 (解決九宮格 Out% = 0 的問題)
                     out_events = [
-                        'field_out', 'strikeout', 'force_out', 'grounded_into_double_play', 
-                        'fielders_choice', 'fielders_choice_out', 'double_play', 
+                        'field_out', 'strikeout', 'force_out', 'grounded_into_double_play',
+                        'fielders_choice_out', 'double_play',
                         'sac_fly', 'sac_bunt', 'strikeout_double_play'
                     ]
                     if 'events' in df_to_save.columns:
