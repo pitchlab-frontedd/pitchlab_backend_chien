@@ -691,7 +691,8 @@ def summarize_rows(rows):
                 "triple": 0, "hr": 0, "so": 0, "bb": 0, "hbp": 0, "outs": 0, "runs": 0,
                 "bbe": 0, "totalBases": 0,
                 "wobaNumerator": 0, "wobaDenominator": 0,
-                "twoStrikePitches": 0, "putAway": 0
+                "twoStrikePitches": 0, "putAway": 0,
+                "speeds": [],
             }
         pitch_types[pitch_type]["total"] += 1
         pitch_types[pitch_type][result] += 1
@@ -705,8 +706,11 @@ def summarize_rows(rows):
         speed = row_dict.get("release_speed")
         if speed is not None:
             try:
-                pitch_types[pitch_type]["speedSum"] += float(speed)
+                v = float(speed)
+                pitch_types[pitch_type]["speedSum"] += v
                 pitch_types[pitch_type]["speedCount"] += 1
+                if len(pitch_types[pitch_type]["speeds"]) < 600:
+                    pitch_types[pitch_type]["speeds"].append(round(v, 1))
             except (TypeError, ValueError):
                 pass
 
@@ -955,6 +959,10 @@ def summarize_rows(rows):
     else:
         sampled_location_points = filtered_location_points
 
+    velocity_data = {
+        pt: d["speeds"] for pt, d in pitch_types.items() if len(d["speeds"]) >= 5
+    }
+
     return {
         "total": total,
         "summaryStats": {
@@ -971,6 +979,7 @@ def summarize_rows(rows):
         "resultData": result_data,
         "pitchTypeData": pitch_type_data,
         "zoneData": zone_data,
+        "velocityData": velocity_data,
         "pitchZoneData": {
             "total": total,
             "zones": pitch_zone_data,
