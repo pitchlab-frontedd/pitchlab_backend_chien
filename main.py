@@ -650,6 +650,7 @@ def summarize_rows(rows):
     result_counts = {key: 0 for key in RESULT_ORDER}
     hr_in_play_count = 0
     pitch_types = {}
+    pitcher_velocity = {}  # { pitcher_id_str: { pitch_type: [speeds] } }
     zones = {
         z: {
             "total": 0, "ball": 0, "called_strike": 0, "swinging_strike": 0,
@@ -711,6 +712,13 @@ def summarize_rows(rows):
                 pitch_types[pitch_type]["speedCount"] += 1
                 if len(pitch_types[pitch_type]["speeds"]) < 600:
                     pitch_types[pitch_type]["speeds"].append(round(v, 1))
+                pid = str(row_dict.get("pitcher") or "unknown")
+                if pid not in pitcher_velocity:
+                    pitcher_velocity[pid] = {}
+                if pitch_type not in pitcher_velocity[pid]:
+                    pitcher_velocity[pid][pitch_type] = []
+                if len(pitcher_velocity[pid][pitch_type]) < 600:
+                    pitcher_velocity[pid][pitch_type].append(round(v, 1))
             except (TypeError, ValueError):
                 pass
 
@@ -959,9 +967,14 @@ def summarize_rows(rows):
     else:
         sampled_location_points = filtered_location_points
 
-    velocity_data = {
-        pt: d["speeds"] for pt, d in pitch_types.items() if len(d["speeds"]) >= 5
-    }
+    velocity_data = {}
+    for pid, pt_map in pitcher_velocity.items():
+        pitcher_pts = {pt: speeds for pt, speeds in pt_map.items() if len(speeds) >= 5}
+        if pitcher_pts:
+            velocity_data[pid] = {
+                "name": pitcher_name_map.get(pid, pid),
+                "pitchTypes": pitcher_pts,
+            }
 
     return {
         "total": total,
