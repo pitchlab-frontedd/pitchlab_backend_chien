@@ -1263,7 +1263,15 @@ def fetch_next_pitch_summary(where, params):
 
 @app.on_event("startup")
 async def startup_event():
-    global TABLE_NAME, PITCH_COLUMNS, TABLE_NAMES
+    global TABLE_NAME, PITCH_COLUMNS, TABLE_NAMES, DATABASE_URL
+
+    if using_postgres():
+        try:
+            conn = connect_db()
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ PostgreSQL 連線失敗，改用 SQLite fallback: {e}")
+            DATABASE_URL = None
 
     if not using_postgres():
         # --- 1. 下載邏輯 (使用 Dropbox 直連) ---
