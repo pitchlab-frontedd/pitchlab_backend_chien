@@ -18,9 +18,16 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 PUBLIC_DB_FILENAME = os.getenv("BASEBALL_DB_FILENAME", "baseball_data_2024_2025.db")
-DB_PATH = os.path.join(BASE_DIR, PUBLIC_DB_FILENAME)
-FULL_DB_PATH = os.path.join(BASE_DIR, "baseball_data.db")
+DB_PATH = (
+    PUBLIC_DB_FILENAME
+    if os.path.isabs(PUBLIC_DB_FILENAME)
+    else os.path.join(DATA_DIR, PUBLIC_DB_FILENAME)
+)
+ROOT_PUBLIC_DB_PATH = os.path.join(BASE_DIR, PUBLIC_DB_FILENAME)
+FULL_DB_PATH = os.path.join(DATA_DIR, "baseball_data.db")
+ROOT_FULL_DB_PATH = os.path.join(BASE_DIR, "baseball_data.db")
 LOCAL_DESKTOP_DB_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "baseball_data.db"))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -76,8 +83,12 @@ WOBA_WEIGHTS = {
 def active_db_path():
     if os.path.exists(DB_PATH):
         return DB_PATH
+    if os.path.exists(ROOT_PUBLIC_DB_PATH):
+        return ROOT_PUBLIC_DB_PATH
     if os.path.exists(FULL_DB_PATH):
         return FULL_DB_PATH
+    if os.path.exists(ROOT_FULL_DB_PATH):
+        return ROOT_FULL_DB_PATH
     if os.path.exists(LOCAL_DESKTOP_DB_PATH):
         return LOCAL_DESKTOP_DB_PATH
     return DB_PATH

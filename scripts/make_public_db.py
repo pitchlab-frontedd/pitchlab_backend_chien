@@ -1,9 +1,10 @@
 import os
 import sqlite3
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SOURCE_DB = os.path.join(BASE_DIR, "baseball_data.db")
-OUTPUT_DB = os.path.join(BASE_DIR, "baseball_data_2024_2025.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+SOURCE_DB = os.getenv("SOURCE_DB_PATH", os.path.join(DATA_DIR, "baseball_data.db"))
+OUTPUT_DB = os.getenv("OUTPUT_DB_PATH", os.path.join(DATA_DIR, "baseball_data_2024_2025.db"))
 START_YEAR = "2024"
 END_YEAR = "2025"
 
@@ -24,6 +25,7 @@ def main():
     if not os.path.exists(SOURCE_DB):
         raise FileNotFoundError(f"Missing source database: {SOURCE_DB}")
 
+    os.makedirs(os.path.dirname(OUTPUT_DB), exist_ok=True)
     if os.path.exists(OUTPUT_DB):
         os.remove(OUTPUT_DB)
 

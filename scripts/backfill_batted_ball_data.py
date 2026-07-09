@@ -9,11 +9,14 @@ from pybaseball import statcast
 
 pybaseball.cache.enable()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.getenv(
     "BASEBALL_DB_FILENAME",
-    os.path.join(BASE_DIR, "baseball_data_2024_2025.db"),
+    os.path.join(DATA_DIR, "baseball_data_2024_2025.db"),
 )
+if not os.path.isabs(DB_PATH):
+    DB_PATH = os.path.join(DATA_DIR, DB_PATH)
 BATCH_DAYS = int(os.getenv("BACKFILL_BATCH_DAYS", "14"))
 
 TARGET_COLUMNS = {

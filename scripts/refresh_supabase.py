@@ -2,12 +2,13 @@ import os
 import subprocess
 import sys
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 STEPS = [
-    ["python3", "sqlite_to_postgres.py"],
-    ["python3", "import_pitcher_standard_stats.py"],
-    ["python3", "build_player_names.py"],
-    ["python3", "check_supabase.py"],
+    ["python3", os.path.join(SCRIPT_DIR, "sqlite_to_postgres.py")],
+    ["python3", os.path.join(SCRIPT_DIR, "import_pitcher_standard_stats.py")],
+    ["python3", os.path.join(SCRIPT_DIR, "build_player_names.py")],
+    ["python3", os.path.join(SCRIPT_DIR, "check_supabase.py")],
 ]
 
 

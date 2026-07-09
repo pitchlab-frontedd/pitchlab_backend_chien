@@ -4,10 +4,11 @@ import sqlite3
 import psycopg2
 from psycopg2.extras import execute_values
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 SQLITE_DB = os.getenv(
     "SQLITE_DB_PATH",
-    os.path.join(BASE_DIR, "baseball_data_2024_2025.db"),
+    os.path.join(DATA_DIR, "baseball_data_2024_2025.db"),
 )
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "10000"))

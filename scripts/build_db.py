@@ -10,8 +10,14 @@ import os
 # 開啟緩存，減少重複抓取負擔
 pybaseball.cache.enable()
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
 def create_database():
-    db_file = os.getenv("BASEBALL_DB_FILENAME", "baseball_data.db")
+    db_file = os.getenv("BASEBALL_DB_FILENAME", os.path.join(DATA_DIR, "baseball_data.db"))
+    if not os.path.isabs(db_file):
+        db_file = os.path.join(DATA_DIR, db_file)
+    os.makedirs(os.path.dirname(db_file), exist_ok=True)
     
     # 💡 專業建議：如果你發現舊資料沒名字或沒出局標記，建議刪除原有的 baseball_data.db 重新執行
     conn = sqlite3.connect(db_file)

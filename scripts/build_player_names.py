@@ -13,10 +13,11 @@ except ImportError:
     psycopg2 = None
     execute_values = None
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 SQLITE_DB = os.getenv(
     "SQLITE_DB_PATH",
-    os.path.join(BASE_DIR, "baseball_data_2024_2025.db"),
+    os.path.join(DATA_DIR, "baseball_data_2024_2025.db"),
 )
 DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("PLAYER_LOOKUP_BATCH_SIZE", "500"))

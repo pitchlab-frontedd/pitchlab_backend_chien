@@ -1,13 +1,20 @@
 import sqlite3
+import os
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 import joblib
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DB_PATH = os.getenv("BASEBALL_DB_FILENAME", os.path.join(DATA_DIR, "baseball_data.db"))
+if not os.path.isabs(DB_PATH):
+    DB_PATH = os.path.join(DATA_DIR, DB_PATH)
+
 # 1. 撈取資料
 print("Reading data from local database...")
-conn = sqlite3.connect("baseball_data.db")
+conn = sqlite3.connect(DB_PATH)
 # ⚠️ 注意：這步會吃掉很多記憶體，若有 700 萬筆，建議記憶體要夠。
 df = pd.read_sql("SELECT * FROM pitches", conn)
 print("Original shape:", df.shape)
