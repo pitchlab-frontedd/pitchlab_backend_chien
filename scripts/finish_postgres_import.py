@@ -1,33 +1,26 @@
 import os
-
 import psycopg2
-
-
-DATABASE_URL = os.getenv("DATABASE_URL")
 
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pitcher ON pitches(pitcher)",
     "CREATE INDEX IF NOT EXISTS idx_batter ON pitches(batter)",
     "CREATE INDEX IF NOT EXISTS idx_public_filters ON pitches(game_date, pitcher_role, pitch_type, balls, strikes)",
     "CREATE INDEX IF NOT EXISTS idx_stand ON pitches(stand)",
+    # ✨ 幫你補上主程式裡有的這一個索引，確保資料庫效能最佳化
+    "CREATE INDEX IF NOT EXISTS idx_pitch_sequence ON pitches(game_pk, at_bat_number, pitch_number)",
 ]
 
-
-def normalize_database_url(database_url):
-    if database_url and database_url.startswith("DATABASE_URL="):
-        database_url = database_url.split("=", 1)[1].strip().strip("'\"")
-    if database_url and "sslmode=" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        return f"{database_url}{separator}sslmode=require"
-    return database_url
-
-
 def main():
-    database_url = normalize_database_url(DATABASE_URL)
-    if not database_url:
-        raise RuntimeError("Set DATABASE_URL to your PostgreSQL connection string first.")
-
-    conn = psycopg2.connect(database_url)
+    # ====================================================================================
+    # 🎯 使用你指定的連線邏輯，直接連上 Pooler 通道
+    # ====================================================================================
+    conn = psycopg2.connect(
+        host="aws-1-ap-south-1.pooler.supabase.com",
+        port=5432,
+        user="postgres.huemnymfnigovthslkbz",
+        password="guanipese911003",
+        database="postgres"
+    )
     conn.autocommit = True
 
     with conn.cursor() as cursor:
@@ -41,7 +34,6 @@ def main():
 
     conn.close()
     print("PostgreSQL import finishing steps complete.")
-
 
 if __name__ == "__main__":
     main()

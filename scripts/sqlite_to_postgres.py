@@ -10,24 +10,13 @@ SQLITE_DB = os.getenv(
     "SQLITE_DB_PATH",
     os.path.join(DATA_DIR, "baseball_data_2024_2025.db"),
 )
-DATABASE_URL = os.getenv("DATABASE_URL")
+
 BATCH_SIZE = int(os.getenv("POSTGRES_IMPORT_BATCH_SIZE", "10000"))
 INSERT_PAGE_SIZE = int(os.getenv("POSTGRES_INSERT_PAGE_SIZE", "5000"))
-RESUME_IMPORT = os.getenv("POSTGRES_IMPORT_RESUME", "").lower() in {"1", "true", "yes"}
+# ✨ 修改 2：設為 False，讓 Supabase 重新建立包含新欄位的資料表
+RESUME_IMPORT = True
 
-
-def normalize_database_url(database_url):
-    if database_url and database_url.startswith("DATABASE_URL="):
-        print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
-        database_url = database_url.split("=", 1)[1].strip().strip("'\"")
-    if database_url and "sslmode=" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        return f"{database_url}{separator}sslmode=require"
-    return database_url
-
-
-DATABASE_URL = normalize_database_url(DATABASE_URL)
-
+# ✨ 修改 3：把 6 個新欄位加入欄位清單
 COLUMNS = [
     "game_pk",
     "at_bat_number",
@@ -62,8 +51,15 @@ COLUMNS = [
     "batter",
     "events",
     "is_out",
+    "pfx_x",
+    "pfx_z",
+    "release_spin_rate",
+    "release_pos_x",
+    "release_pos_z",
+    "release_extension",
 ]
 
+# ✨ 修改 4：在 SQL 建表語法中，宣告這 6 個新欄位的資料型態 (DOUBLE PRECISION)
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS pitches (
     game_pk INTEGER,
@@ -98,7 +94,13 @@ CREATE TABLE IF NOT EXISTS pitches (
     pitcher INTEGER,
     batter INTEGER,
     events TEXT,
-    is_out INTEGER
+    is_out INTEGER,
+    pfx_x DOUBLE PRECISION,
+    pfx_z DOUBLE PRECISION,
+    release_spin_rate DOUBLE PRECISION,
+    release_pos_x DOUBLE PRECISION,
+    release_pos_z DOUBLE PRECISION,
+    release_extension DOUBLE PRECISION
 )
 """
 
@@ -110,6 +112,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pitch_sequence ON pitches(game_pk, at_bat_number, pitch_number)",
 ]
 
+# ✨ 修改 5：把新欄位加入 FLOAT 判定，確保傳上雲端時都是數字
 FLOAT_COLUMNS = {
     "delta_run_exp",
     "delta_home_win_exp",
@@ -119,6 +122,12 @@ FLOAT_COLUMNS = {
     "plate_z",
     "launch_speed",
     "launch_angle",
+    "pfx_x",
+    "pfx_z",
+    "release_spin_rate",
+    "release_pos_x",
+    "release_pos_z",
+    "release_extension",
 }
 
 INTEGER_COLUMNS = {
@@ -173,8 +182,6 @@ def chunked(items, size):
 
 
 def main():
-    if not DATABASE_URL:
-        raise RuntimeError("Set DATABASE_URL to your PostgreSQL connection string first.")
     if not os.path.exists(SQLITE_DB):
         raise FileNotFoundError(f"Missing SQLite database: {SQLITE_DB}")
 
@@ -182,7 +189,13 @@ def main():
     source.row_factory = sqlite3.Row
     total = source.execute("SELECT COUNT(*) FROM pitches").fetchone()[0]
 
-    target = psycopg2.connect(DATABASE_URL)
+    target = psycopg2.connect(
+        host="aws-1-ap-south-1.pooler.supabase.com",
+        port=5432,
+        user="postgres.huemnymfnigovthslkbz",
+        password="guanipese911003",
+        database="postgres"
+    )
     target.autocommit = False
 
     with target.cursor() as cursor:

@@ -89,7 +89,8 @@ def create_database():
                         'home_win_exp', 'bat_win_exp',
                         'release_speed', 'plate_x', 'plate_z', 'description', 'type', 
                         'zone', 'player_name', 'pitcher', 'batter', 'events',
-                        'launch_speed', 'launch_angle', 'bb_type'
+                        'launch_speed', 'launch_angle', 'bb_type',
+                        'pfx_x', 'pfx_z', 'release_spin_rate', 'release_pos_x', 'release_pos_z', 'release_extension'
                     ]
                     
                     # 只選取存在的欄位
@@ -109,6 +110,12 @@ def create_database():
                         df_to_save['is_out'] = df_to_save['events'].isin(out_events).astype(int)
                     else:
                         df_to_save['is_out'] = 0
+
+                    # ✨ 【新增：強制將物理特徵轉為浮點數，確保資料庫型態正確不會報錯】
+                    phys_cols = ['pfx_x', 'pfx_z', 'release_spin_rate', 'release_pos_x', 'release_pos_z', 'release_extension']
+                    for col in phys_cols:
+                        if col in df_to_save.columns:
+                            df_to_save[col] = pd.to_numeric(df_to_save[col], errors='coerce')
 
                     # ✨ 【新增 2】把對應 COUNT 篩選器的 balls 和 strikes 加入空值排除名單
                     # 避免前端傳入 0-0 卻因為資料庫有空值而報錯
@@ -180,6 +187,10 @@ def create_database():
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_count ON pitches(balls, strikes)")
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_outs ON pitches(outs_when_up)")
                     
+                    # ✨ 【新增：為物理特徵建立索引，加速未來的 KNN 模型與相似投手查詢】
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_spin ON pitches(release_spin_rate)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_pfx ON pitches(pfx_x, pfx_z)")
+                    
                     time.sleep(1)
 
                 except KeyboardInterrupt:
@@ -191,7 +202,7 @@ def create_database():
                     time.sleep(5)
 
     conn.close()
-    print("🎉 資料庫補完完畢！所有球員名字、出局標記與篩選器資料已就緒。")
+    print("🎉 資料庫補完完畢！所有球員名字、出局標記、篩選器與物理特徵資料已就緒。")
 
 if __name__ == "__main__":
     create_database()

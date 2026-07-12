@@ -15,38 +15,25 @@ except ImportError:
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-SQLITE_DB = os.getenv(
-    "SQLITE_DB_PATH",
-    os.path.join(DATA_DIR, "baseball_data_2024_2025.db"),
-)
-DATABASE_URL = os.getenv("DATABASE_URL")
 BATCH_SIZE = int(os.getenv("PLAYER_LOOKUP_BATCH_SIZE", "500"))
 MLB_API_BATCH_SIZE = int(os.getenv("MLB_API_LOOKUP_BATCH_SIZE", "100"))
 
 
-def normalize_database_url(database_url):
-    if database_url and database_url.startswith("DATABASE_URL="):
-        print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
-        return database_url.split("=", 1)[1].strip().strip("'\"")
-    return database_url
-
-
-DATABASE_URL = normalize_database_url(DATABASE_URL)
-
-
 def using_postgres():
-    return bool(DATABASE_URL)
+    return True
 
 
 def connect_db():
-    if using_postgres():
-        if psycopg2 is None:
-            raise RuntimeError("psycopg2-binary is required when DATABASE_URL is set")
-        return psycopg2.connect(DATABASE_URL)
-
-    if not os.path.exists(SQLITE_DB):
-        raise FileNotFoundError(f"Missing SQLite database: {SQLITE_DB}")
-    return sqlite3.connect(SQLITE_DB)
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2-binary is required for PostgreSQL connection")
+    
+    return psycopg2.connect(
+        host="aws-1-ap-south-1.pooler.supabase.com",
+        port=5432,
+        user="postgres.huemnymfnigovthslkbz",
+        password="guanipese911003",
+        database="postgres"
+    )
 
 
 def fetch_player_ids(conn):

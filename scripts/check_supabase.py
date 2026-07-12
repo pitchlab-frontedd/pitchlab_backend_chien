@@ -1,6 +1,5 @@
 import os
 import sys
-from urllib.parse import urlparse
 
 try:
     import psycopg2
@@ -30,38 +29,35 @@ REQUIRED_PITCH_COLUMNS = {
     "launch_speed",
     "launch_angle",
     "bb_type",
+    # ✨ 幫你補上 6 個新增的進階物理特徵欄位，讓健康檢查能驗證它們的存在
+    "pfx_x",
+    "pfx_z",
+    "release_spin_rate",
+    "release_pos_x",
+    "release_pos_z",
+    "release_extension",
 }
 
 
-def masked_database_url(database_url):
-    parsed = urlparse(database_url)
-    host = parsed.hostname or "unknown-host"
-    port = f":{parsed.port}" if parsed.port else ""
-    db_name = parsed.path.lstrip("/") or "unknown-db"
-    return f"{parsed.scheme}://***@{host}{port}/{db_name}"
-
-
-def normalize_database_url(database_url):
-    if database_url and database_url.startswith("DATABASE_URL="):
-        print("Detected DATABASE_URL= inside the connection string; using the value after '='.")
-        return database_url.split("=", 1)[1].strip().strip("'\"")
-    return database_url
-
-
 def main():
-    database_url = normalize_database_url(os.getenv("DATABASE_URL"))
-    if not database_url:
-        print("DATABASE_URL is not set. This app will use SQLite, not Supabase/PostgreSQL.")
-        return 1
-
     if psycopg2 is None:
         print("psycopg2-binary is not installed, so PostgreSQL cannot be used.")
         return 1
 
-    print(f"Checking {masked_database_url(database_url)}")
+    print("Checking connection to aws-1-ap-south-1.pooler.supabase.com...")
 
+    # ====================================================================================
+    # 🎯 使用你指定的拆解參數邏輯，直接走 Pooler 安全通道進行檢查
+    # ====================================================================================
     try:
-        conn = psycopg2.connect(database_url, connect_timeout=10)
+        conn = psycopg2.connect(
+            host="aws-1-ap-south-1.pooler.supabase.com",
+            port=5432,
+            user="postgres.huemnymfnigovthslkbz",
+            password="guanipese911003",
+            database="postgres",
+            connect_timeout=10
+        )
     except Exception as exc:
         print(f"Connection failed: {exc}")
         return 1

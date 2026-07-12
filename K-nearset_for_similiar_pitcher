@@ -1,0 +1,229 @@
+import pandas as pd
+import psycopg2
+from psycopg2.extras import execute_values
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import NearestNeighbors
+import json
+import warnings
+
+# 忽略 Pandas 的 UserWarning 警告
+warnings.filterwarnings('ignore', category=UserWarning)
+
+def get_combined_data(min_total_pitches=200):
+    print("正在從 Supabase 撈取配球比例與物理特徵綜合數據...")
+    
+    conn = psycopg2.connect(
+        host="aws-1-ap-south-1.pooler.supabase.com",
+        port=5432,
+        user="postgres.huemnymfnigovthslkbz",
+        password="guanipese911003",
+        database="postgres"
+    )
+    
+    sql = """
+        SELECT 
+            player_name,
+            pitch_type,
+            COUNT(*) as pitch_count,
+            AVG(release_speed) as avg_speed,
+            AVG(pfx_x) as avg_pfx_x,
+            AVG(pfx_z) as avg_pfx_z,
+            AVG(release_spin_rate) as avg_spin_rate
+        FROM pitches
+        WHERE pitch_type IS NOT NULL
+        GROUP BY player_name, pitch_type
+    """
+    
+    df_raw = pd.read_sql_query(sql, conn)
+    conn.close()
+
+    print("正在建立多維度特徵矩陣...")
+    df_raw['total_pitches'] = df_raw.groupby('player_name')['pitch_count'].transform('sum')
+    df_filtered = df_raw[df_raw['total_pitches'] >= min_total_pitches].copy()
+    df_filtered['usage_rate'] = df_filtered['pitch_count'] / df_filtered['total_pitches']
+    
+    df_model = df_filtered.drop(columns=['pitch_count', 'total_pitches'])
+    df_pivot = df_model.pivot(index='player_name', columns='pitch_type')
+    df_pivot.columns = [f"{col[0]}_{col[1]}" for col in df_pivot.columns]
+    df_pivot = df_pivot.fillna(0)
+    
+    return df_pivot
+
+def get_pitcher_stats_lists(df, pitcher_name):
+    pitch_types = set([col.split('_')[-1] for col in df.columns if col.startswith('usage_rate_')])
+    pitcher_data = df.loc[pitcher_name]
+    thrown_pitches = []
+    
+    for pt in pitch_types:
+        usage = pitcher_data.get(f"usage_rate_{pt}", 0)
+        if usage > 0.01:
+            thrown_pitches.append({
+                'pitch': pt,
+                'usage': round(float(usage), 4),
+                'speed': round(float(pitcher_data.get(f"avg_speed_{pt}", 0)), 1),
+                'spin': round(float(pitcher_data.get(f"avg_spin_rate_{pt}", 0)), 0),
+                'pfx_x': round(float(pitcher_data.get(f"avg_pfx_x_{pt}", 0)), 2),
+                'pfx_z': round(float(pitcher_data.get(f"avg_pfx_z_{pt}", 0)), 2)
+            })
+            
+    thrown_pitches.sort(key=lambda x: x['usage'], reverse=True)
+    json_str = json.dumps(thrown_pitches)
+    
+    return json_str, thrown_pitches
+
+def calculate_all_results(df, n_neighbors=5):
+    """
+    同時運算出「資料庫專用」與「Excel 專用」兩種截然不同的表格格式
+    """
+    print("正在計算所有投手的相似度矩陣，並生成獨立報表格式...")
+    
+    X = df.values
+    pitcher_names = df.index.tolist()
+    
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    knn = NearestNeighbors(n_neighbors=n_neighbors + 1, algorithm='auto')
+    knn.fit(X_scaled)
+    
+    distances, indices = knn.kneighbors(X_scaled)
+    
+    # 分開儲存兩種格式的結果
+    db_results = []
+    excel_results = []
+    
+    max_pitches_to_show = 5 
+
+    for i, target_pitcher in enumerate(pitcher_names):
+        target_json, target_list = get_pitcher_stats_lists(df, target_pitcher)
+        
+        # =========================================================
+        # 【Excel 專用】第 1 步：先建立「目標投手」自己的基準資料 (Rank 0)
+        # =========================================================
+        target_excel_row = {
+            '查詢目標群組': target_pitcher,
+            '角色': '⭐ 基準',
+            '對象姓名': target_pitcher,
+            '排名': 0,
+            '差異分數': 0.0000
+        }
+        for j in range(max_pitches_to_show):
+            prefix = f"球種{j+1}"
+            if j < len(target_list):
+                p = target_list[j]
+                target_excel_row[f"{prefix}"] = p['pitch']
+                target_excel_row[f"{prefix}_使用率"] = f"{p['usage']*100:.1f}%"
+                target_excel_row[f"{prefix}_球速"] = p['speed']
+                target_excel_row[f"{prefix}_轉速"] = p['spin']
+                target_excel_row[f"{prefix}_水平"] = p['pfx_x']
+                target_excel_row[f"{prefix}_垂直"] = p['pfx_z']
+            else:
+                for col_suffix in ["", "_使用率", "_球速", "_轉速", "_水平", "_垂直"]:
+                    target_excel_row[f"{prefix}{col_suffix}"] = ""
+                    
+        excel_results.append(target_excel_row)
+        
+        # =========================================================
+        # 第 2 步：依序處理 5 位相似投手
+        # =========================================================
+        for rank in range(1, n_neighbors + 1):
+            sim_idx = indices[i][rank]
+            sim_pitcher = pitcher_names[sim_idx]
+            dist = distances[i][rank]
+            
+            sim_json, sim_list = get_pitcher_stats_lists(df, sim_pitcher)
+            
+            # 【資料庫專用】：保持簡潔的 6 個核心欄位與 JSON
+            db_results.append({
+                'target_pitcher': target_pitcher,
+                'similar_pitcher': sim_pitcher,
+                'rank': rank,
+                'distance_score': round(float(dist), 4),
+                'target_stats_json': target_json,
+                'similar_stats_json': sim_json
+            })
+            
+            # 【Excel 專用】：緊接在目標投手底下，產出相似投手的獨立列
+            sim_excel_row = {
+                '查詢目標群組': target_pitcher,
+                '角色': '相似',
+                '對象姓名': sim_pitcher,
+                '排名': rank,
+                '差異分數': round(float(dist), 4)
+            }
+            for j in range(max_pitches_to_show):
+                prefix = f"球種{j+1}"
+                if j < len(sim_list):
+                    p = sim_list[j]
+                    sim_excel_row[f"{prefix}"] = p['pitch']
+                    sim_excel_row[f"{prefix}_使用率"] = f"{p['usage']*100:.1f}%"
+                    sim_excel_row[f"{prefix}_球速"] = p['speed']
+                    sim_excel_row[f"{prefix}_轉速"] = p['spin']
+                    sim_excel_row[f"{prefix}_水平"] = p['pfx_x']
+                    sim_excel_row[f"{prefix}_垂直"] = p['pfx_z']
+                else:
+                    for col_suffix in ["", "_使用率", "_球速", "_轉速", "_水平", "_垂直"]:
+                        sim_excel_row[f"{prefix}{col_suffix}"] = ""
+                        
+            excel_results.append(sim_excel_row)
+            
+    return pd.DataFrame(db_results), pd.DataFrame(excel_results)
+
+def export_to_excel(df_excel, filename="pitcher_similarities.xlsx"):
+    print(f"正在將結果匯出至 Excel 檔案: {filename} ...")
+    df_excel.to_excel(filename, index=False)
+    print("Excel 匯出完成！")
+
+def export_to_supabase(df_db):
+    print("正在將結果寫入 Supabase 資料庫...")
+    
+    conn = psycopg2.connect(
+        host="aws-1-ap-south-1.pooler.supabase.com",
+        port=5432,
+        user="postgres.huemnymfnigovthslkbz",
+        password="guanipese911003",
+        database="postgres"
+    )
+    cursor = conn.cursor()
+    
+    cursor.execute("DROP TABLE IF EXISTS pitcher_similarities;")
+    
+    create_table_query = """
+    CREATE TABLE pitcher_similarities (
+        id SERIAL PRIMARY KEY,
+        target_pitcher VARCHAR(100),
+        similar_pitcher VARCHAR(100),
+        rank INTEGER,
+        distance_score NUMERIC,
+        target_stats JSONB,
+        similar_stats JSONB
+    );
+    """
+    cursor.execute(create_table_query)
+    
+    data_tuples = [tuple(x) for x in df_db.to_numpy()]
+    
+    insert_query = """
+    INSERT INTO pitcher_similarities (
+        target_pitcher, similar_pitcher, rank, distance_score, target_stats, similar_stats
+    )
+    VALUES %s
+    """
+    execute_values(cursor, insert_query, data_tuples)
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("Supabase 資料庫寫入完成！")
+
+def main():
+    df_combined = get_combined_data(min_total_pitches=200)
+    if not df_combined.empty:
+        # 現在這個函數會同時吐出 DB 專用表 跟 Excel 專用表
+        df_db, df_excel = calculate_all_results(df_combined, n_neighbors=5)
+        
+        export_to_excel(df_excel)
+        export_to_supabase(df_db)
+
+if __name__ == "__main__":
+    main()
