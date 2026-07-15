@@ -1645,6 +1645,26 @@ async def get_pitch_empirical(
     except Exception as e:
         print(f"❌ Empirical API 錯誤: {e}")
         return {"total": 0, "recommendations": []}
+
+@app.get("/api/pitcher-similarities")  # 💡 確定移除網址後面的 {pitcher_name}
+async def get_pitcher_similarities(pitcher_name: str = None):  # 💡 用 Query 參數接收
+    try:
+        if not pitcher_name:
+            return []
+            
+        query = """
+            SELECT similar_pitcher, rank, distance_score, similar_stats 
+            FROM pitcher_similarities 
+            WHERE target_pitcher = %s
+            ORDER BY rank ASC;
+        """
+        
+        rows = fetch_all_dicts(query, [pitcher_name])
+        return rows
+
+    except Exception as e:
+        print(f"❌ Similarities API 錯誤: {e}")
+        return []
     
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
