@@ -1,6 +1,8 @@
 fastapi
 uvicorn
 pandas
+numpy
 pybaseball
 requests
 psycopg2-binary
+scikit-learn
