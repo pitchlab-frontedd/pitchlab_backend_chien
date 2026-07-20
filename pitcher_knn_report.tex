@@ -1,0 +1,299 @@
+% !TeX program = xelatex
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs,array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{etoolbox}
+\usepackage{listings}
+
+% ---- CJK (Overleaf 內建 Noto CJK 字型，xelatex 編譯) ----
+\usepackage{xeCJK}
+\setCJKmainfont{Noto Serif CJK TC}
+\setCJKsansfont{Noto Sans CJK TC}
+\setCJKmonofont{Noto Sans Mono CJK TC}
+
+\definecolor{ntpublue}{RGB}{0,78,105}
+\definecolor{ntpudark}{RGB}{0,55,75}
+\definecolor{ntpulight}{RGB}{228,240,244}
+\definecolor{accentred}{RGB}{177,36,44}
+\definecolor{softgreen}{RGB}{226,242,235}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamercolor{normal text}{fg=black,bg=white}
+\setbeamercolor{frametitle}{fg=ntpudark,bg=white}
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+\setbeamerfont{title}{size=\Large}
+\setbeamerfont{subtitle}{size=\normalsize}
+\setbeamerfont{author}{size=\small}
+\setbeamerfont{institute}{size=\small}
+\setbeamerfont{date}{size=\small}
+\setbeamertemplate{itemize item}{\color{ntpublue}\scriptsize$\blacksquare$}
+\setbeamertemplate{itemize subitem}{\color{ntpublue}\scriptsize$\blacktriangleright$}
+
+% ---- code style ----
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codeframe}{RGB}{200,200,200}
+\definecolor{keyword}{RGB}{0,0,180}
+\definecolor{comment}{RGB}{100,100,100}
+\definecolor{string}{RGB}{0,140,0}
+\lstdefinestyle{Pystyle}{
+  language=Python,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  basicstyle=\scriptsize\ttfamily,
+  keywordstyle=\color{keyword}\bfseries,
+  commentstyle=\color{comment}\itshape,
+  stringstyle=\color{string},
+  breaklines=true,
+  showstringspaces=false,
+  tabsize=2
+}
+\lstset{style=Pystyle}
+
+\newcommand{\runningsection}{}
+\newcommand{\setrunningsection}[1]{\renewcommand{\runningsection}{#1}}
+\newcommand{\papertitle}{相似投手推薦系統：K-Nearest Neighbors 配球特徵相似度分析}
+\newcommand{\shortpapertitle}{相似投手推薦系統 -- KNN 相似度分析}
+\newcommand{\presenter}{Shang-Ying Shiu}
+\setbeamercolor{headerfooter}{fg=white,bg=ntpublue}
+
+\setbeamertemplate{headline}{
+  \leavevmode
+  {\color{ntpublue}\rule{\paperwidth}{0.05cm}}
+  \vspace{0.10cm}
+}
+
+\setbeamertemplate{footline}{
+  \leavevmode
+  \hbox{%
+    \begin{beamercolorbox}[wd=.22\paperwidth,ht=0.38cm,dp=0.12cm,leftskip=0.20cm]{headerfooter}
+      \fontsize{7.2}{8.0}\selectfont\presenter
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.56\paperwidth,ht=0.38cm,dp=0.12cm,center]{headerfooter}
+      \fontsize{7.2}{8.0}\selectfont\shortpapertitle
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.22\paperwidth,ht=0.38cm,dp=0.12cm,leftskip=0pt plus 1fil,rightskip=0.20cm]{headerfooter}
+      \fontsize{7.2}{8.0}\selectfont\insertframenumber
+    \end{beamercolorbox}%
+  }%
+}
+
+\newcommand{\tocrow}[2]{%
+  \ifdefstring{\runningsection}{#2}%
+    {\tikz[baseline=-0.62ex]\node[fill=ntpublue,text=white,font=\bfseries,
+        minimum width=0.5cm,minimum height=0.5cm,inner sep=0pt]{#1};%
+     \hspace{0.3cm}\textbf{\color{black}#2}}%
+    {\tikz[baseline=-0.62ex]\node[fill=black!8,text=black!35,
+        minimum width=0.5cm,minimum height=0.5cm,inner sep=0pt]{#1};%
+     \hspace{0.3cm}\color{black!35}#2}%
+  \par\vspace{0.3cm}%
+}
+
+\newcommand{\SectionToc}[1]{
+  \setrunningsection{#1}
+  \begin{frame}{Table of Contents}
+    \vspace{0.2cm}
+    \tocrow{1}{資料撈取與特徵工程}
+    \tocrow{2}{標準化與 KNN 演算法}
+    \tocrow{3}{參數設定}
+    \tocrow{4}{輸出格式與小結}
+  \end{frame}
+}
+
+\title{\papertitle}
+\author{\presenter}
+\date{\today}
+
+\begin{document}
+
+\setrunningsection{}
+\begin{frame}
+  \titlepage
+  \vspace{-0.2cm}
+\end{frame}
+
+\SectionToc{資料撈取與特徵工程}
+
+\begin{frame}{系統目標與整體流程}
+  \begin{itemize}
+    \item \textbf{目標}：給定一位投手，從資料庫中所有投手裡找出配球特徵
+          最相似的 5 位投手，供 App 端做「相似投手推薦」使用。
+    \item 整體流程：
+    \begin{itemize}
+      \item 從 Supabase（\texttt{pitches} 資料表）撈取逐球資料，依「投手
+            $\times$ 球種」聚合出配球比例與物理特徵
+      \item 將每位投手整理成一個高維特徵向量，並做標準化
+      \item 以 KNN 計算投手間的歐氏距離，取出最相似的 5 位投手
+      \item 同時輸出成 Excel 報表與寫回 Supabase 資料表
+    \end{itemize}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{原始資料聚合}
+  以 SQL 依 \texttt{player\_name} 與 \texttt{pitch\_type} 分組，計算每位
+  投手每種球路的物理特徵：
+  \begin{lstlisting}
+SELECT player_name, pitch_type,
+       COUNT(*) as pitch_count,
+       AVG(release_speed) as avg_speed,
+       AVG(pfx_x) as avg_pfx_x,
+       AVG(pfx_z) as avg_pfx_z,
+       AVG(release_spin_rate) as avg_spin_rate
+FROM pitches
+WHERE pitch_type IS NOT NULL
+GROUP BY player_name, pitch_type
+  \end{lstlisting}
+  \vspace{0.1cm}
+  平均球速、平均水平位移（\texttt{pfx\_x}）、平均垂直位移
+  （\texttt{pfx\_z}）、平均轉速，以及球路投出次數。
+\end{frame}
+
+\begin{frame}{樣本數過濾與球種使用率}
+  \textbf{樣本數過濾}：只保留生涯總投球數足夠的投手，避免樣本過少導致
+  統計量不穩定：
+  \[
+    \text{total\_pitches}(p)=\sum_{\text{pitch\_type}}\text{pitch\_count}(p,\text{pitch\_type})
+  \]
+  \[
+    \text{保留條件：}\quad \text{total\_pitches}(p)\ge \texttt{min\_total\_pitches}=200
+  \]
+  \vspace{0.2cm}
+  \textbf{球種使用率}：
+  \[
+    \text{usage\_rate}(p,t)=\frac{\text{pitch\_count}(p,t)}{\text{total\_pitches}(p)}
+  \]
+\end{frame}
+
+\begin{frame}[fragile]{特徵矩陣建構}
+  用 \texttt{pivot} 把「長表」（每列為 投手+球種）轉成「寬表」，每一列
+  代表一位投手，欄位命名為 \texttt{特徵\_球種}：
+  \begin{lstlisting}
+df_pivot = df_model.pivot(index='player_name',
+                           columns='pitch_type')
+df_pivot.columns = [f"{col[0]}_{col[1]}"
+                     for col in df_pivot.columns]
+df_pivot = df_pivot.fillna(0)
+  \end{lstlisting}
+  \begin{itemize}
+    \item 投手沒投過的球種，對應欄位以 0 填補
+    \item 最終每位投手是一個高維向量，涵蓋各球種的
+          \textbf{使用率、球速、轉速、水平位移、垂直位移}
+  \end{itemize}
+\end{frame}
+
+\SectionToc{標準化與 KNN 演算法}
+
+\begin{frame}{特徵標準化}
+  各特徵單位量綱差異極大（使用率 0--1，球速 90+ mph，轉速 2000+ rpm）。
+  若不標準化，轉速會在歐氏距離中完全主導計算，掩蓋使用率與位移的影響。
+  \vspace{0.2cm}
+
+  以 \texttt{StandardScaler} 做 Z-score 標準化：
+  \[
+    z_{ij}=\frac{x_{ij}-\mu_j}{\sigma_j}
+  \]
+  其中 $x_{ij}$ 為第 $i$ 位投手第 $j$ 個特徵的原始值，$\mu_j,\sigma_j$
+  為該特徵在所有投手中的平均與標準差。
+\end{frame}
+
+\begin{frame}[fragile]{最近鄰搜尋}
+  使用 \texttt{sklearn.neighbors.NearestNeighbors}：
+  \begin{lstlisting}
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+knn = NearestNeighbors(n_neighbors=n_neighbors + 1,
+                        algorithm='auto')
+knn.fit(X_scaled)
+distances, indices = knn.kneighbors(X_scaled)
+  \end{lstlisting}
+  距離度量採用預設值，即\textbf{歐氏距離}：
+  \[
+    d(p,q)=\sqrt{\sum_{j=1}^{D}(z_{pj}-z_{qj})^2}
+  \]
+  距離值愈小代表兩位投手的配球特徵愈相似。
+\end{frame}
+
+\begin{frame}[fragile]{排除投手自己}
+  每位投手在向量空間中距離自己最近的一定是自己本身（距離 $=0$），因此
+  查詢時多取一個鄰居（\texttt{n\_neighbors + 1}），再從排名 1 開始取值：
+  \begin{lstlisting}
+for rank in range(1, n_neighbors + 1):
+    sim_idx = indices[i][rank]
+    sim_pitcher = pitcher_names[sim_idx]
+    dist = distances[i][rank]
+  \end{lstlisting}
+  \begin{itemize}
+    \item 排名 0：投手自己（距離 $=0$，捨棄不用）
+    \item 排名 1--5：真正的 5 位相似投手
+  \end{itemize}
+\end{frame}
+
+\SectionToc{參數設定}
+
+\begin{frame}{參數設定總表}
+  \begingroup\scriptsize
+  \begin{tabular}{lll}
+    \toprule
+    參數 & 設定值 & 設定原因 \\
+    \midrule
+    \texttt{min\_total\_pitches} & 200 & 過濾投球樣本數過少的投手 \\
+    \texttt{n\_neighbors} & 5 & 每位投手輸出 5 位最相似投手 \\
+    \texttt{max\_pitches\_to\_show} & 5 & Excel 中每位投手最多列前 5 種球路 \\
+    球種篩選門檻 & usage $>0$ & 只排除完全沒投過的球種，其餘皆視為真實球路 \\
+    標準化方式 & StandardScaler & 消除特徵量綱差異，使距離計算公平 \\
+    KNN 演算法 & \texttt{algorithm='auto'} & 依資料量/維度自動選最有效率的搜尋法 \\
+    距離度量 & 歐氏距離（預設） & 值愈小代表兩位投手愈相似 \\
+    \bottomrule
+  \end{tabular}
+  \endgroup
+\end{frame}
+
+\SectionToc{輸出格式與小結}
+
+\begin{frame}{輸出格式}
+  同一次運算同時產出兩種格式的結果：
+  \vspace{0.2cm}
+
+  \textbf{Excel 報表}（\texttt{pitcher\_similarities.xlsx}，人工檢視用）
+  \begin{itemize}
+    \item 每位目標投手先列出自己的基準列（$\star$ 基準，排名 0）
+    \item 接著列出 5 位相似投手（排名 1--5），含前 5 種球路的使用率/
+          球速/轉速/位移明細
+  \end{itemize}
+
+  \vspace{0.2cm}
+  \textbf{Supabase 資料表}（\texttt{pitcher\_similarities}，API 查詢用）
+  \begin{itemize}
+    \item 欄位精簡為六項：\texttt{target\_pitcher}、\texttt{similar\_pitcher}、
+          \texttt{rank}、\texttt{distance\_score}、\texttt{target\_stats}
+          (JSONB)、\texttt{similar\_stats} (JSONB)
+    \item 每次執行前先 \texttt{DROP TABLE IF EXISTS} 重建，確保資料與最新
+          運算結果一致
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{小結}
+  \begin{itemize}
+    \item 以「球種使用率 + 球速 + 轉速 + 水平/垂直位移」構成每位投手的
+          配球特徵向量
+    \item 標準化後以 KNN（歐氏距離）計算投手間相似度
+    \item 用最小樣本數門檻（200 球）過濾投球紀錄過少的投手
+    \item 同時輸出人工可讀的 Excel 報表與供後端 API 查詢的資料庫表，
+          兩者共用同一份運算結果，確保呈現一致
+  \end{itemize}
+\end{frame}
+
+\setrunningsection{}
+\begin{frame}
+  \centering
+  \vfill
+  {\Large Thank you.}
+  \vfill
+\end{frame}
+
+\end{document}

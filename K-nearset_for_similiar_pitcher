@@ -56,7 +56,7 @@ def get_pitcher_stats_lists(df, pitcher_name):
     
     for pt in pitch_types:
         usage = pitcher_data.get(f"usage_rate_{pt}", 0)
-        if usage > 0.01:
+        if usage > 0:
             thrown_pitches.append({
                 'pitch': pt,
                 'usage': round(float(usage), 4),
