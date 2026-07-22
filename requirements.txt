@@ -6,3 +6,4 @@ pybaseball
 requests
 psycopg2-binary
 scikit-learn
+openpyxl

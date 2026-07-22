@@ -6,6 +6,7 @@
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
 \usepackage{etoolbox}
 \usepackage{listings}
 
@@ -119,18 +120,31 @@
 \SectionToc{資料撈取與特徵工程}
 
 \begin{frame}{系統目標與整體流程}
-  \begin{itemize}
-    \item \textbf{目標}：給定一位投手，從資料庫中所有投手裡找出配球特徵
-          最相似的 5 位投手，供 App 端做「相似投手推薦」使用。
-    \item 整體流程：
-    \begin{itemize}
-      \item 從 Supabase（\texttt{pitches} 資料表）撈取逐球資料，依「投手
-            $\times$ 球種」聚合出配球比例與物理特徵
-      \item 將每位投手整理成一個高維特徵向量，並做標準化
-      \item 以 KNN 計算投手間的歐氏距離，取出最相似的 5 位投手
-      \item 同時輸出成 Excel 報表與寫回 Supabase 資料表
-    \end{itemize}
-  \end{itemize}
+  \textbf{目標}：給定一位投手，從資料庫中所有投手裡找出配球特徵
+  最相似的 5 位投手，供 App 端做「相似投手推薦」使用。
+
+  \vspace{0.4cm}
+  \centering
+  \begin{tikzpicture}[
+      box/.style={draw=ntpublue, fill=ntpulight, rounded corners,
+        align=center, minimum height=1.3cm, minimum width=2.9cm,
+        font=\scriptsize, thick, text=black},
+      smallbox/.style={box, minimum height=0.9cm, minimum width=2.6cm},
+      arrow/.style={-{Latex[length=2.2mm]}, ntpublue, thick}
+    ]
+    \node[box] (a) {撈取原始資料\\[2pt]\tiny Supabase \texttt{pitches} 逐球資料};
+    \node[box, right=0.7cm of a] (b) {聚合特徵工程\\[2pt]\tiny 投手 $\times$ 球種 配球比例＋物理特徵};
+    \node[box, right=0.7cm of b] (c) {標準化 + KNN\\[2pt]\tiny StandardScaler 歐氏距離取前 5 名};
+    \node[smallbox, right=1.0cm of c, yshift=0.65cm] (d1) {Excel 報表\\[1pt]\tiny 人工檢視用};
+    \node[smallbox, right=1.0cm of c, yshift=-0.65cm] (d2) {Supabase 資料表\\[1pt]\tiny API 查詢用};
+    \coordinate (fork) at ($(c.east)+(0.5,0)$);
+
+    \draw[arrow] (a) -- (b);
+    \draw[arrow] (b) -- (c);
+    \draw[ntpublue, thick] (c.east) -- (fork);
+    \draw[arrow] (fork) |- (d1.west);
+    \draw[arrow] (fork) |- (d2.west);
+  \end{tikzpicture}
 \end{frame}
 
 \begin{frame}[fragile]{原始資料聚合}
